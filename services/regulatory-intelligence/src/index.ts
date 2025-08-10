@@ -23,10 +23,12 @@ import regulationsRoutes from '@/routes/regulations';
 import circularsRoutes from '@/routes/circulars';
 import changesRoutes from '@/routes/changes';
 import impactRoutes from '@/routes/impact';
+import regulationsRoutes from '@/routes/regulations';
 import scraperRoutes from '@/routes/scraper';
 import parserRoutes from '@/routes/parser';
 import notificationRoutes from '@/routes/notifications';
 import timelineRoutes from '@/routes/timeline';
+import docsRoutes from '@/routes/docs';
 import healthRoutes from '@/routes/health';
 
 // Load environment variables
@@ -112,10 +114,12 @@ class RegulatoryIntelligenceService {
     this.app.use('/api/v1/circulars', authMiddleware, circularsRoutes);
     this.app.use('/api/v1/changes', authMiddleware, changesRoutes);
     this.app.use('/api/v1/impact', authMiddleware, impactRoutes);
+    this.app.use('/api/v1/regulations', authMiddleware, regulationsRoutes);
     this.app.use('/api/v1/scraper', authMiddleware, scraperRoutes);
     this.app.use('/api/v1/parser', authMiddleware, parserRoutes);
     this.app.use('/api/v1/notifications', authMiddleware, notificationRoutes);
     this.app.use('/api/v1/timeline', authMiddleware, timelineRoutes);
+    this.app.use('/api/v1/docs', docsRoutes);
 
     // Root endpoint
     this.app.get('/', (req, res) => {
