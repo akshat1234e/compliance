@@ -23,6 +23,7 @@ import regulationsRoutes from '@/routes/regulations';
 import circularsRoutes from '@/routes/circulars';
 import changesRoutes from '@/routes/changes';
 import impactRoutes from '@/routes/impact';
+import scraperRoutes from '@/routes/scraper';
 import healthRoutes from '@/routes/health';
 
 // Load environment variables
@@ -108,6 +109,7 @@ class RegulatoryIntelligenceService {
     this.app.use('/api/v1/circulars', authMiddleware, circularsRoutes);
     this.app.use('/api/v1/changes', authMiddleware, changesRoutes);
     this.app.use('/api/v1/impact', authMiddleware, impactRoutes);
+    this.app.use('/api/v1/scraper', authMiddleware, scraperRoutes);
 
     // Root endpoint
     this.app.get('/', (req, res) => {
@@ -121,7 +123,8 @@ class RegulatoryIntelligenceService {
           regulations: '/api/v1/regulations',
           circulars: '/api/v1/circulars',
           changes: '/api/v1/changes',
-          impact: '/api/v1/impact'
+          impact: '/api/v1/impact',
+          scraper: '/api/v1/scraper'
         }
       });
     });
@@ -136,7 +139,8 @@ class RegulatoryIntelligenceService {
           '/api/v1/regulations',
           '/api/v1/circulars',
           '/api/v1/changes',
-          '/api/v1/impact'
+          '/api/v1/impact',
+          '/api/v1/scraper'
         ]
       });
     });
