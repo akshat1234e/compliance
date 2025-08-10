@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # DEVELOPMENT OVERRIDES
+  # =============================================================================
+
+  postgres:
+    environment:
+      POSTGRES_DB: rbi_compliance_dev
+    volumes:
+      - ./scripts/dev-seed.sql:/docker-entrypoint-initdb.d/dev-seed.sql
+
+  mongodb:
+    environment:
+      MONGO_INITDB_DATABASE: rbi_compliance_docs_dev
+
+  # =============================================================================
+  # DEVELOPMENT TOOLS
+  # =============================================================================
+
+  # Adminer for PostgreSQL management
+  adminer:
+    image: adminer:4.8.1
+    container_name: rbi-adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - rbi-network
+    depends_on:
+      - postgres
+
+  # Mongo Express for MongoDB management
+  mongo-express:
+    image: mongo-express:1.0.0-alpha
+    container_name: rbi-mongo-express
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: mongodb
+      ME_CONFIG_MONGODB_URL: mongodb://root:mongodb@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8081:8081"
+    networks:
+      - rbi-network
+    depends_on:
+      - mongodb
+
+  # Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: rbi-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8082:8081"
+    networks:
+      - rbi-network
+    depends_on:
+      - redis
+
+  # Kibana for Elasticsearch management
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.9.0
+    container_name: rbi-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      xpack.security.enabled: false
+    ports:
+      - "5601:5601"
+    networks:
+      - rbi-network
+    depends_on:
+      - elasticsearch
