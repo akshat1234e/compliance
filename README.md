@@ -47,8 +47,8 @@ A comprehensive, enterprise-grade compliance orchestration platform designed for
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd enterprise-rbi-compliance-platform
+   git clone https://github.com/akshat1234e/compliance.git
+   cd compliance
    ```
 
 2. **Install dependencies**
@@ -60,13 +60,13 @@ A comprehensive, enterprise-grade compliance orchestration platform designed for
    ```bash
    # Start all infrastructure services (databases, message queues, etc.)
    ./scripts/docker-dev.sh start
-   
+
    # Setup Kafka topics
    ./scripts/setup-kafka-topics.sh
-   
+
    # Setup RabbitMQ queues
    ./scripts/setup-rabbitmq.sh
-   
+
    # Setup Kong API Gateway
    ./scripts/setup-kong.sh
    ```
