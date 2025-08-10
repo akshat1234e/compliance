@@ -25,6 +25,7 @@ import changesRoutes from '@/routes/changes';
 import impactRoutes from '@/routes/impact';
 import scraperRoutes from '@/routes/scraper';
 import parserRoutes from '@/routes/parser';
+import notificationRoutes from '@/routes/notifications';
 import healthRoutes from '@/routes/health';
 
 // Load environment variables
@@ -112,6 +113,7 @@ class RegulatoryIntelligenceService {
     this.app.use('/api/v1/impact', authMiddleware, impactRoutes);
     this.app.use('/api/v1/scraper', authMiddleware, scraperRoutes);
     this.app.use('/api/v1/parser', authMiddleware, parserRoutes);
+    this.app.use('/api/v1/notifications', authMiddleware, notificationRoutes);
 
     // Root endpoint
     this.app.get('/', (req, res) => {
@@ -127,7 +129,8 @@ class RegulatoryIntelligenceService {
           changes: '/api/v1/changes',
           impact: '/api/v1/impact',
           scraper: '/api/v1/scraper',
-          parser: '/api/v1/parser'
+          parser: '/api/v1/parser',
+          notifications: '/api/v1/notifications'
         }
       });
     });
@@ -144,7 +147,8 @@ class RegulatoryIntelligenceService {
           '/api/v1/changes',
           '/api/v1/impact',
           '/api/v1/scraper',
-          '/api/v1/parser'
+          '/api/v1/parser',
+          '/api/v1/notifications'
         ]
       });
     });
