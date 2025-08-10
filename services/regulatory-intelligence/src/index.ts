@@ -17,6 +17,7 @@ import { errorHandler } from '@middleware/errorHandler';
 import { requestLogger } from '@middleware/requestLogger';
 import { validateRequest } from '@middleware/validation';
 import { authMiddleware } from '@middleware/auth';
+import { databaseService } from '@database/DatabaseService';
 
 // Import routes
 import regulationsRoutes from '@/routes/regulations';
@@ -166,13 +167,35 @@ class RegulatoryIntelligenceService {
     this.app.use(errorHandler);
   }
 
-  public start(): void {
-    this.app.listen(this.port, () => {
-      logger.info(`🚀 Regulatory Intelligence Service started on port ${this.port}`);
-      logger.info(`📊 Environment: ${config.env}`);
-      logger.info(`🔗 Health check: http://localhost:${this.port}/health`);
-      logger.info(`📡 API base URL: http://localhost:${this.port}/api/v1`);
-    });
+  public async start(): Promise<void> {
+    try {
+      // Initialize database connections
+      logger.info('Initializing database connections...');
+      await databaseService.initialize();
+      logger.info('✅ Database connections established');
+
+      // Start the server
+      this.app.listen(this.port, () => {
+        logger.info(`🚀 Regulatory Intelligence Service started on port ${this.port}`);
+        logger.info(`📊 Environment: ${config.env}`);
+        logger.info(`🔗 Health check: http://localhost:${this.port}/health`);
+        logger.info(`📡 API base URL: http://localhost:${this.port}/api/v1`);
+        logger.info(`💾 Database: PostgreSQL, MongoDB, Redis, Elasticsearch`);
+      });
+    } catch (error) {
+      logger.error('Failed to start service', error);
+      process.exit(1);
+    }
+  }
+
+  public async shutdown(): Promise<void> {
+    try {
+      logger.info('Shutting down service...');
+      await databaseService.shutdown();
+      logger.info('✅ Service shutdown completed');
+    } catch (error) {
+      logger.error('Error during shutdown', error);
+    }
   }
 
   public getApp(): express.Application {
@@ -184,13 +207,15 @@ class RegulatoryIntelligenceService {
 const service = new RegulatoryIntelligenceService();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully');
+  await service.shutdown();
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully');
+  await service.shutdown();
   process.exit(0);
 });
 

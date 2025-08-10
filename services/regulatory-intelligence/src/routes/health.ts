@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { config } from '@config/index';
 import { logger } from '@utils/logger';
 import { asyncHandler } from '@middleware/errorHandler';
+import { databaseService } from '@database/DatabaseService';
 
 const router = Router();
 
@@ -117,70 +118,27 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
   };
 
   try {
-    // Check PostgreSQL connection
-    try {
-      const pgStartTime = Date.now();
-      // TODO: Add actual PostgreSQL connection check
-      // const pgClient = new Pool(config.database.postgres);
-      // await pgClient.query('SELECT 1');
-      // await pgClient.end();
-      
-      health.checks.postgresql = {
-        status: 'pass',
-        message: 'PostgreSQL connection successful',
-        duration: `${Date.now() - pgStartTime}ms`,
-      };
-    } catch (error) {
-      health.checks.postgresql = {
-        status: 'fail',
-        message: 'PostgreSQL connection failed',
-        details: { error: (error as Error).message },
-      };
-    }
+    // Get comprehensive database health check
+    const dbHealthCheck = await databaseService.healthCheck();
 
-    // Check MongoDB connection
-    try {
-      const mongoStartTime = Date.now();
-      // TODO: Add actual MongoDB connection check
-      // const mongoClient = new MongoClient(config.database.mongodb.uri);
-      // await mongoClient.connect();
-      // await mongoClient.db().admin().ping();
-      // await mongoClient.close();
-      
-      health.checks.mongodb = {
-        status: 'pass',
-        message: 'MongoDB connection successful',
-        duration: `${Date.now() - mongoStartTime}ms`,
+    // Map database health to health check format
+    Object.entries(dbHealthCheck.databases).forEach(([dbName, isHealthy]) => {
+      health.checks[dbName] = {
+        status: isHealthy ? 'pass' : 'fail',
+        message: isHealthy ? `${dbName} connection successful` : `${dbName} connection failed`,
+        details: dbHealthCheck.details[dbName] || {},
       };
-    } catch (error) {
-      health.checks.mongodb = {
-        status: 'fail',
-        message: 'MongoDB connection failed',
-        details: { error: (error as Error).message },
-      };
-    }
+    });
 
-    // Check Redis connection
-    try {
-      const redisStartTime = Date.now();
-      // TODO: Add actual Redis connection check
-      // const redisClient = createClient(config.database.redis);
-      // await redisClient.connect();
-      // await redisClient.ping();
-      // await redisClient.disconnect();
-      
-      health.checks.redis = {
-        status: 'pass',
-        message: 'Redis connection successful',
-        duration: `${Date.now() - redisStartTime}ms`,
-      };
-    } catch (error) {
-      health.checks.redis = {
-        status: 'fail',
-        message: 'Redis connection failed',
-        details: { error: (error as Error).message },
-      };
-    }
+    // Add overall database status
+    health.checks.database_overall = {
+      status: dbHealthCheck.overall ? 'pass' : 'fail',
+      message: dbHealthCheck.overall ? 'All databases healthy' : 'Some databases unhealthy',
+      details: {
+        healthy: Object.values(dbHealthCheck.databases).filter(Boolean).length,
+        total: Object.keys(dbHealthCheck.databases).length,
+      },
+    };
 
     // Check Elasticsearch connection
     try {
