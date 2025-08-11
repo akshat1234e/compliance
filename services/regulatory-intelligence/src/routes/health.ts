@@ -2,11 +2,11 @@
  * Health check routes for Regulatory Intelligence Service
  */
 
-import { Router, Request, Response } from 'express';
 import { config } from '@config/index';
-import { logger } from '@utils/logger';
-import { asyncHandler } from '@middleware/errorHandler';
 import { databaseService } from '@database/DatabaseService';
+import { asyncHandler } from '@middleware/errorHandler';
+import { logger } from '@utils/logger';
+import { Request, Response, Router } from 'express';
 
 const router = Router();
 
@@ -30,7 +30,7 @@ interface HealthStatus {
 // Basic health check
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const startTime = Date.now();
-  
+
   const health: HealthStatus = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -78,7 +78,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
     }
 
     const duration = Date.now() - startTime;
-    
+
     // Log health check
     logger.debug('Health check completed', {
       status: health.status,
@@ -91,7 +91,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 
   } catch (error) {
     logger.error('Health check failed', { error: (error as Error).message });
-    
+
     health.status = 'unhealthy';
     health.checks.general = {
       status: 'fail',
@@ -106,7 +106,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 // Detailed health check with external dependencies
 router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
   const startTime = Date.now();
-  
+
   const health: HealthStatus = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -146,7 +146,7 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
       // TODO: Add actual Elasticsearch connection check
       // const esClient = new Client({ node: config.database.elasticsearch.node });
       // await esClient.ping();
-      
+
       health.checks.elasticsearch = {
         status: 'pass',
         message: 'Elasticsearch connection successful',
@@ -165,7 +165,7 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
       const rbiStartTime = Date.now();
       // TODO: Add actual RBI website check
       // const response = await axios.get(config.externalServices.rbi.baseUrl, { timeout: 5000 });
-      
+
       health.checks.rbi_website = {
         status: 'pass',
         message: 'RBI website accessible',
@@ -175,6 +175,31 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
       health.checks.rbi_website = {
         status: 'warn',
         message: 'RBI website check failed',
+        details: { error: (error as Error).message },
+      };
+    }
+
+    // Check scheduled scraping service
+    try {
+      // Import service instance dynamically to avoid circular dependency
+      const serviceModule = await import('../index');
+      const service = serviceModule.default;
+      const schedulerStatus = service.getScheduler().getStatus();
+
+      health.checks.scheduled_scraping = {
+        status: schedulerStatus.isRunning ? 'pass' : 'warn',
+        message: schedulerStatus.isRunning ? 'Scheduler is running' : 'Scheduler is not running',
+        details: {
+          isRunning: schedulerStatus.isRunning,
+          lastRun: schedulerStatus.lastRun,
+          nextRun: schedulerStatus.nextRun,
+          activeTasks: schedulerStatus.activeTasks,
+        },
+      };
+    } catch (error) {
+      health.checks.scheduled_scraping = {
+        status: 'fail',
+        message: 'Failed to get scheduler status',
         details: { error: (error as Error).message },
       };
     }
@@ -205,7 +230,7 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
     }
 
     const duration = Date.now() - startTime;
-    
+
     logger.info('Detailed health check completed', {
       status: health.status,
       duration: `${duration}ms`,
@@ -219,7 +244,7 @@ router.get('/detailed', asyncHandler(async (req: Request, res: Response) => {
 
   } catch (error) {
     logger.error('Detailed health check failed', { error: (error as Error).message });
-    
+
     health.status = 'unhealthy';
     health.checks.general = {
       status: 'fail',

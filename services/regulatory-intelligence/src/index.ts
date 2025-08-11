@@ -3,34 +3,35 @@
  * Enterprise RBI Compliance Management Platform
  */
 
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
 import compression from 'compression';
-import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
+import cors from 'cors';
 import dotenv from 'dotenv';
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import morgan from 'morgan';
 
 import { config } from '@config/index';
-import { logger } from '@utils/logger';
+import { databaseService } from '@database/DatabaseService';
+import { authMiddleware } from '@middleware/auth';
 import { errorHandler } from '@middleware/errorHandler';
 import { requestLogger } from '@middleware/requestLogger';
-import { validateRequest } from '@middleware/validation';
-import { authMiddleware } from '@middleware/auth';
-import { databaseService } from '@database/DatabaseService';
+import { logger } from '@utils/logger';
 
 // Import routes
-import regulationsRoutes from '@/routes/regulations';
-import circularsRoutes from '@/routes/circulars';
 import changesRoutes from '@/routes/changes';
-import impactRoutes from '@/routes/impact';
-import regulationsRoutes from '@/routes/regulations';
-import scraperRoutes from '@/routes/scraper';
-import parserRoutes from '@/routes/parser';
-import notificationRoutes from '@/routes/notifications';
-import timelineRoutes from '@/routes/timeline';
+import circularsRoutes from '@/routes/circulars';
 import docsRoutes from '@/routes/docs';
 import healthRoutes from '@/routes/health';
+import impactRoutes from '@/routes/impact';
+import notificationRoutes from '@/routes/notifications';
+import parserRoutes from '@/routes/parser';
+import regulationsRoutes from '@/routes/regulations';
+import scraperRoutes from '@/routes/scraper';
+import timelineRoutes from '@/routes/timeline';
+
+// Services
+import ScheduledScrapingService from '@services/scheduledScrapingService';
 
 // Load environment variables
 dotenv.config();
@@ -38,13 +39,19 @@ dotenv.config();
 class RegulatoryIntelligenceService {
   private app: express.Application;
   private port: number;
+  private scheduler: ScheduledScrapingService;
 
   constructor() {
     this.app = express();
     this.port = config.port;
+    this.scheduler = new ScheduledScrapingService();
     this.initializeMiddleware();
     this.initializeRoutes();
     this.initializeErrorHandling();
+  }
+
+  public getScheduler(): ScheduledScrapingService {
+    return this.scheduler;
   }
 
   private initializeMiddleware(): void {
@@ -115,7 +122,6 @@ class RegulatoryIntelligenceService {
     this.app.use('/api/v1/circulars', authMiddleware, circularsRoutes);
     this.app.use('/api/v1/changes', authMiddleware, changesRoutes);
     this.app.use('/api/v1/impact', authMiddleware, impactRoutes);
-    this.app.use('/api/v1/regulations', authMiddleware, regulationsRoutes);
     this.app.use('/api/v1/scraper', authMiddleware, scraperRoutes);
     this.app.use('/api/v1/parser', authMiddleware, parserRoutes);
     this.app.use('/api/v1/notifications', authMiddleware, notificationRoutes);
@@ -174,6 +180,15 @@ class RegulatoryIntelligenceService {
       await databaseService.initialize();
       logger.info('✅ Database connections established');
 
+      // Start scheduled scraping
+      try {
+        const scheduleConfig = ScheduledScrapingService.getDefaultConfig();
+        this.scheduler.start(scheduleConfig);
+        logger.info('🗓️ Scheduled scraping started', scheduleConfig);
+      } catch (schedErr) {
+        logger.error('Failed to start scheduled scraping', schedErr);
+      }
+
       // Start the server
       this.app.listen(this.port, () => {
         logger.info(`🚀 Regulatory Intelligence Service started on port ${this.port}`);
@@ -191,6 +206,15 @@ class RegulatoryIntelligenceService {
   public async shutdown(): Promise<void> {
     try {
       logger.info('Shutting down service...');
+
+      // Stop scheduled scraping
+      try {
+        this.scheduler.stop();
+        logger.info('🛑 Scheduled scraping stopped');
+      } catch (schedErr) {
+        logger.error('Failed to stop scheduled scraping', schedErr);
+      }
+
       await databaseService.shutdown();
       logger.info('✅ Service shutdown completed');
     } catch (error) {

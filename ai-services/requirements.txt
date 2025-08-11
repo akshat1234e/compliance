@@ -96,6 +96,7 @@ category-encoders==2.6.1
 # Model Deployment
 mlflow==2.6.0
 bentoml==1.0.25
+schedule==1.2.0
 
 # Security
 cryptography==41.0.4

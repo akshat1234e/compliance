@@ -25,6 +25,7 @@ from src.api.middleware import (
     ErrorHandlingMiddleware,
     RateLimitMiddleware,
 )
+from src.services.scheduled_training_service import scheduled_training_service
 
 # Setup logging
 setup_logging()
@@ -36,36 +37,44 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
     logger.info("🚀 Starting AI/ML Services...")
-    
+
     try:
         # Initialize databases
         await init_databases()
         logger.info("✅ Databases initialized")
-        
+
         # Initialize cache
         await init_cache()
         logger.info("✅ Cache initialized")
-        
+
         # Initialize ML models
         await init_models()
         logger.info("✅ ML models initialized")
-        
+
+        # Start scheduled training service
+        scheduled_training_service.start()
+        logger.info("✅ Scheduled training service started")
+
         logger.info("🎯 AI/ML Services startup completed")
-        
+
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("🛑 Shutting down AI/ML Services...")
-    
+
     try:
+        # Stop scheduled training service
+        scheduled_training_service.stop()
+        logger.info("✅ Scheduled training service stopped")
+
         await close_cache()
         await close_databases()
         logger.info("✅ Cleanup completed")
-        
+
     except Exception as e:
         logger.error(f"❌ Shutdown error: {e}")
 
@@ -160,7 +169,7 @@ async def metrics() -> Dict[str, Any]:
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler"""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    
+
     return JSONResponse(
         status_code=500,
         content={

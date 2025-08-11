@@ -3,10 +3,12 @@
  * Handles automated scraping of RBI circulars on a schedule
  */
 
-import cron from 'node-cron';
 import { logger, loggers } from '@utils/logger';
-import RBIScraperService, { ScrapingOptions } from './scraperService';
-import { config } from '@config/index';
+import crypto from 'crypto';
+import cron from 'node-cron';
+import { databaseService } from '../database/DatabaseService';
+import NotificationService from './notificationService';
+import RBIScraperService, { ScrapingOptions, ScrapingResult } from './scraperService';
 
 export interface ScheduleConfig {
   enabled: boolean;
@@ -22,6 +24,7 @@ export class ScheduledScrapingService {
   private isRunning = false;
   private lastRun: Date | null = null;
   private nextRun: Date | null = null;
+  private lastInsertedIds: string[] = [];
 
   constructor() {
     this.scraperService = new RBIScraperService();
@@ -83,7 +86,6 @@ export class ScheduledScrapingService {
   public stop(): void {
     this.scheduledTasks.forEach((task, name) => {
       task.stop();
-      task.destroy();
       logger.info(`Stopped scheduled task: ${name}`);
     });
 
@@ -104,7 +106,7 @@ export class ScheduledScrapingService {
 
     this.isRunning = true;
     this.lastRun = new Date();
-    
+
     const startTime = Date.now();
 
     try {
@@ -183,7 +185,7 @@ export class ScheduledScrapingService {
         return await fn();
       } catch (error) {
         lastError = error as Error;
-        
+
         if (attempt === maxAttempts) {
           throw lastError;
         }
@@ -204,17 +206,84 @@ export class ScheduledScrapingService {
   /**
    * Store scraping results in database
    */
-  private async storeScrapingResults(result: any): Promise<void> {
+  private async storeScrapingResults(result: ScrapingResult): Promise<void> {
     try {
-      // TODO: Implement database storage
       logger.debug('Storing scraping results', {
         totalCirculars: result.totalFound,
         timestamp: result.scrapedAt,
       });
 
-      // For now, just log the action
+      const insertedIds: string[] = [];
+
+      for (const circular of result.circulars) {
+        try {
+          // Check if circular already exists
+          const existing = await databaseService.postgres.getCircularByNumber(circular.circularNumber);
+          if (existing) {
+            logger.debug('Circular already exists, skipping', { circularNumber: circular.circularNumber });
+            continue;
+          }
+
+          // Create content hash for deduplication
+          const contentHash = crypto.createHash('sha256')
+            .update(`${circular.title}|${circular.circularDate}|${circular.sourceUrl}`)
+            .digest('hex');
+
+          // Create circular in PostgreSQL
+          const savedCircular = await databaseService.postgres.createCircular({
+            circular_number: circular.circularNumber,
+            title: circular.title,
+            category: circular.category || 'General',
+            sub_category: circular.subCategory || 'General',
+            published_date: new Date(circular.circularDate),
+            source_url: circular.sourceUrl,
+            content_hash: contentHash,
+            impact_level: 'medium',
+            affected_entities: ['banks', 'nbfcs'],
+            status: 'active',
+          });
+
+          // Index in Elasticsearch
+          await databaseService.elasticsearch.indexCircular({
+            id: savedCircular.id,
+            circular_number: savedCircular.circular_number,
+            title: savedCircular.title,
+            content: '',
+            category: savedCircular.category,
+            published_date: savedCircular.published_date.toISOString(),
+            impact_level: savedCircular.impact_level,
+            affected_entities: savedCircular.affected_entities,
+            keywords: [],
+            topics: [],
+            status: savedCircular.status,
+            indexed_at: new Date(),
+          });
+
+          insertedIds.push(savedCircular.id);
+          logger.debug('Circular stored and indexed', {
+            id: savedCircular.id,
+            circularNumber: circular.circularNumber
+          });
+
+        } catch (circularError) {
+          logger.error('Failed to store individual circular', {
+            circularNumber: circular.circularNumber,
+            error: (circularError as Error).message,
+          });
+        }
+      }
+
+      this.lastInsertedIds = insertedIds;
+
+      loggers.business('scraping_store_results', {
+        totalProcessed: result.circulars.length,
+        inserted: insertedIds.length,
+        skipped: result.circulars.length - insertedIds.length
+      });
+
       logger.info('Scraping results stored successfully', {
-        totalCirculars: result.totalFound,
+        totalProcessed: result.circulars.length,
+        inserted: insertedIds.length,
       });
 
     } catch (error) {
@@ -229,16 +298,53 @@ export class ScheduledScrapingService {
   /**
    * Send notifications for new circulars
    */
-  private async sendNewCircularNotifications(result: any): Promise<void> {
+  private async sendNewCircularNotifications(result: ScrapingResult): Promise<void> {
     try {
-      // TODO: Implement notification sending
+      const newCircularIds = this.lastInsertedIds;
+      if (newCircularIds.length === 0) {
+        logger.debug('No new circulars to notify about');
+        return;
+      }
+
       logger.debug('Sending new circular notifications', {
-        totalNew: result.totalFound,
+        totalNew: newCircularIds.length,
       });
 
-      // For now, just log the action
+      const notificationService = new NotificationService();
+
+      for (const circularId of newCircularIds) {
+        try {
+          // Fetch saved circular for notification details
+          const circular = await databaseService.postgres.getCircularById(circularId);
+          if (!circular) {
+            logger.warn('Circular not found for notification', { circularId });
+            continue;
+          }
+
+          // Send regulatory change notification
+          await notificationService.sendRegulatoryChangeNotification(
+            circular.id,
+            circular.title,
+            circular.impact_level,
+            [], // Empty recipients for now - would fetch from subscriber management
+            `New RBI circular indexed: ${circular.circular_number}`
+          );
+
+          logger.debug('Notification sent for circular', {
+            circularId: circular.id,
+            circularNumber: circular.circular_number
+          });
+
+        } catch (notificationError) {
+          logger.error('Failed to send notification for individual circular', {
+            circularId,
+            error: (notificationError as Error).message,
+          });
+        }
+      }
+
       logger.info('New circular notifications sent', {
-        totalNew: result.totalFound,
+        totalNew: newCircularIds.length,
       });
 
     } catch (error) {
@@ -255,12 +361,31 @@ export class ScheduledScrapingService {
    */
   private async sendFailureNotification(error: Error): Promise<void> {
     try {
-      // TODO: Implement failure notification
       logger.debug('Sending scraping failure notification', {
         error: error.message,
       });
 
-      // For now, just log the action
+      const notificationService = new NotificationService();
+
+      // Send system alert notification
+      await notificationService.sendNotification({
+        id: `scraping_failure_${Date.now()}`,
+        type: 'system_alert',
+        priority: 'high',
+        title: 'Scheduled Scraping Failed',
+        message: `Automated RBI circular scraping failed: ${error.message}`,
+        recipients: [{
+          id: 'ops-team',
+          type: 'group',
+          identifier: 'ops-team',
+        }],
+        channels: ['in_app', 'email'],
+        metadata: {
+          source: 'regulatory-intelligence-service',
+          tags: ['scraping', 'failure', 'system'],
+        },
+      });
+
       logger.warn('Scraping failure notification sent', {
         error: error.message,
       });
@@ -281,7 +406,7 @@ export class ScheduledScrapingService {
       // Simple calculation - in a real implementation, you'd use a proper cron parser
       const now = new Date();
       this.nextRun = new Date(now.getTime() + 24 * 60 * 60 * 1000); // Default to 24 hours from now
-      
+
       logger.debug('Next scheduled run updated', {
         nextRun: this.nextRun.toISOString(),
       });

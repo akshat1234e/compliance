@@ -11,6 +11,11 @@ from src.api.endpoints import (
     risk_assessment,
     document_processing,
     models,
+    model_training,
+    ai_gateway,
+    service_integration,
+    batch_processing,
+    api_docs,
     health,
 )
 
@@ -52,4 +57,34 @@ api_router.include_router(
     models.router,
     prefix="/models",
     tags=["models"]
+)
+
+api_router.include_router(
+    model_training.router,
+    prefix="/training",
+    tags=["model-training"]
+)
+
+api_router.include_router(
+    ai_gateway.router,
+    prefix="/ai",
+    tags=["ai-gateway"]
+)
+
+api_router.include_router(
+    service_integration.router,
+    prefix="/integration",
+    tags=["service-integration"]
+)
+
+api_router.include_router(
+    batch_processing.router,
+    prefix="/batch",
+    tags=["batch-processing"]
+)
+
+api_router.include_router(
+    api_docs.router,
+    prefix="/docs",
+    tags=["api-documentation"]
 )
