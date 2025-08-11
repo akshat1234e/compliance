@@ -1,0 +1,1069 @@
+/**
+ * Enhanced Workflow Builder Component
+ * Advanced workflow builder with additional features like conditions, forms, and integrations
+ */
+
+import {
+    Badge,
+    Button,
+    Input,
+    LoadingSpinner,
+    Modal
+} from '@/components/ui';
+import { cn } from '@/lib/utils';
+import React, { useCallback, useRef, useState } from 'react';
+import { Workflow, WorkflowNode } from './WorkflowBuilder';
+
+// Extended types for enhanced features
+export interface EnhancedWorkflowNode extends WorkflowNode {
+  data: WorkflowNode['data'] & {
+    // Form configuration
+    formConfig?: {
+      fields: Array<{
+        id: string;
+        label: string;
+        type: 'text' | 'number' | 'date' | 'select' | 'textarea' | 'file' | 'checkbox' | 'radio';
+        required: boolean;
+        placeholder?: string;
+        options?: string[];
+        validation?: {
+          min?: number;
+          max?: number;
+          pattern?: string;
+          message?: string;
+        };
+      }>;
+      layout: 'single' | 'two-column' | 'tabs';
+    };
+    // Integration settings
+    integrations?: Array<{
+      type: 'email' | 'webhook' | 'api' | 'database';
+      config: any;
+      trigger: 'on_start' | 'on_complete' | 'on_error';
+    }>;
+    // Advanced conditions
+    advancedConditions?: Array<{
+      field: string;
+      operator: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'contains' | 'in' | 'not_in' | 'exists' | 'not_exists';
+      value: any;
+      logicalOperator?: 'AND' | 'OR';
+    }>;
+    // SLA settings
+    slaConfig?: {
+      warningThreshold: number; // hours
+      escalationThreshold: number; // hours
+      escalationUsers: string[];
+      businessHoursOnly: boolean;
+    };
+    // Automation scripts
+    scripts?: Array<{
+      trigger: 'on_enter' | 'on_exit' | 'on_timeout';
+      language: 'javascript' | 'python';
+      code: string;
+    }>;
+  };
+}
+
+export interface EnhancedWorkflow extends Workflow {
+  nodes: EnhancedWorkflowNode[];
+  // Global workflow settings
+  globalSettings: {
+    timezone: string;
+    businessHours: {
+      start: string;
+      end: string;
+      days: number[]; // 0-6, Sunday-Saturday
+    };
+    notifications: {
+      channels: ('email' | 'sms' | 'in_app' | 'webhook')[];
+      templates: Record<string, string>;
+    };
+    integrations: Array<{
+      id: string;
+      name: string;
+      type: 'crm' | 'erp' | 'document_management' | 'notification';
+      config: any;
+    }>;
+  };
+}
+
+export interface EnhancedWorkflowBuilderProps {
+  workflow?: EnhancedWorkflow;
+  loading?: boolean;
+  onSave?: (workflow: EnhancedWorkflow) => void;
+  onPublish?: (workflowId: string) => void;
+  onTest?: (workflow: EnhancedWorkflow) => void;
+  onCancel?: () => void;
+  readOnly?: boolean;
+  availableIntegrations?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    icon: string;
+  }>;
+}
+
+const EnhancedWorkflowBuilder: React.FC<EnhancedWorkflowBuilderProps> = ({
+  workflow,
+  loading = false,
+  onSave,
+  onPublish,
+  onTest,
+  onCancel,
+  readOnly = false,
+  availableIntegrations = []
+}) => {
+  const [currentWorkflow, setCurrentWorkflow] = useState<EnhancedWorkflow>(
+    workflow || {
+      id: '',
+      name: 'New Enhanced Workflow',
+      description: '',
+      category: 'compliance',
+      status: 'draft',
+      version: '1.0',
+      createdBy: 'Current User',
+      createdDate: new Date().toISOString(),
+      lastModifiedBy: 'Current User',
+      lastModifiedDate: new Date().toISOString(),
+      nodes: [],
+      triggers: [],
+      variables: [],
+      permissions: [],
+      globalSettings: {
+        timezone: 'Asia/Kolkata',
+        businessHours: {
+          start: '09:00',
+          end: '18:00',
+          days: [1, 2, 3, 4, 5] // Monday to Friday
+        },
+        notifications: {
+          channels: ['email', 'in_app'],
+          templates: {}
+        },
+        integrations: []
+      }
+    }
+  );
+
+  const [selectedNode, setSelectedNode] = useState<EnhancedWorkflowNode | null>(null);
+  const [showNodeEditor, setShowNodeEditor] = useState(false);
+  const [showFormBuilder, setShowFormBuilder] = useState(false);
+  const [showConditionBuilder, setShowConditionBuilder] = useState(false);
+  const [showIntegrationConfig, setShowIntegrationConfig] = useState(false);
+  const [showGlobalSettings, setShowGlobalSettings] = useState(false);
+  const [activeEditorTab, setActiveEditorTab] = useState<'basic' | 'form' | 'conditions' | 'integrations' | 'sla' | 'scripts'>('basic');
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [draggedNodeType, setDraggedNodeType] = useState<string | null>(null);
+
+  // Enhanced node types with more options
+  const enhancedNodeTypes = [
+    {
+      type: 'start',
+      title: 'Start',
+      icon: '🚀',
+      description: 'Workflow start point',
+      color: 'bg-success-100 border-success-300',
+      category: 'flow'
+    },
+    {
+      type: 'task',
+      title: 'Task',
+      icon: '📋',
+      description: 'Manual task assignment',
+      color: 'bg-blue-100 border-blue-300',
+      category: 'action'
+    },
+    {
+      type: 'approval',
+      title: 'Approval',
+      icon: '✅',
+      description: 'Approval step with multiple approvers',
+      color: 'bg-warning-100 border-warning-300',
+      category: 'action'
+    },
+    {
+      type: 'condition',
+      title: 'Condition',
+      icon: '🔀',
+      description: 'Advanced conditional branching',
+      color: 'bg-purple-100 border-purple-300',
+      category: 'logic'
+    },
+    {
+      type: 'form',
+      title: 'Form',
+      icon: '📝',
+      description: 'Data collection form',
+      color: 'bg-indigo-100 border-indigo-300',
+      category: 'action'
+    },
+    {
+      type: 'notification',
+      title: 'Notification',
+      icon: '📧',
+      description: 'Multi-channel notification',
+      color: 'bg-orange-100 border-orange-300',
+      category: 'action'
+    },
+    {
+      type: 'integration',
+      title: 'Integration',
+      icon: '🔗',
+      description: 'External system integration',
+      color: 'bg-teal-100 border-teal-300',
+      category: 'action'
+    },
+    {
+      type: 'script',
+      title: 'Script',
+      icon: '⚙️',
+      description: 'Custom automation script',
+      color: 'bg-gray-100 border-gray-300',
+      category: 'logic'
+    },
+    {
+      type: 'delay',
+      title: 'Delay',
+      icon: '⏰',
+      description: 'Time-based delay',
+      color: 'bg-yellow-100 border-yellow-300',
+      category: 'logic'
+    },
+    {
+      type: 'parallel',
+      title: 'Parallel',
+      icon: '🔄',
+      description: 'Parallel execution',
+      color: 'bg-pink-100 border-pink-300',
+      category: 'flow'
+    },
+    {
+      type: 'merge',
+      title: 'Merge',
+      icon: '🔀',
+      description: 'Merge parallel branches',
+      color: 'bg-cyan-100 border-cyan-300',
+      category: 'flow'
+    },
+    {
+      type: 'end',
+      title: 'End',
+      icon: '🏁',
+      description: 'Workflow end point',
+      color: 'bg-error-100 border-error-300',
+      category: 'flow'
+    }
+  ];
+
+  // Group node types by category
+  const nodeCategories = {
+    flow: enhancedNodeTypes.filter(n => n.category === 'flow'),
+    action: enhancedNodeTypes.filter(n => n.category === 'action'),
+    logic: enhancedNodeTypes.filter(n => n.category === 'logic')
+  };
+
+  // Event handlers
+  const handleNodeDragStart = useCallback((nodeType: string) => {
+    setDraggedNodeType(nodeType);
+  }, []);
+
+  const handleCanvasDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (!draggedNodeType || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left - canvasOffset.x) / zoom;
+    const y = (e.clientY - rect.top - canvasOffset.y) / zoom;
+
+    const nodeConfig = enhancedNodeTypes.find(nt => nt.type === draggedNodeType);
+    const newNode: EnhancedWorkflowNode = {
+      id: `node_${Date.now()}`,
+      type: draggedNodeType as any,
+      title: nodeConfig?.title || 'New Node',
+      description: '',
+      position: { x, y },
+      data: {},
+      connections: []
+    };
+
+    setCurrentWorkflow(prev => ({
+      ...prev,
+      nodes: [...prev.nodes, newNode]
+    }));
+
+    setDraggedNodeType(null);
+  }, [draggedNodeType, canvasOffset, zoom]);
+
+  const handleNodeClick = useCallback((node: EnhancedWorkflowNode) => {
+    if (readOnly) return;
+    setSelectedNode(node);
+    setShowNodeEditor(true);
+    setActiveEditorTab('basic');
+  }, [readOnly]);
+
+  const handleNodeUpdate = useCallback((updatedNode: EnhancedWorkflowNode) => {
+    setCurrentWorkflow(prev => ({
+      ...prev,
+      nodes: prev.nodes.map(node =>
+        node.id === updatedNode.id ? updatedNode : node
+      )
+    }));
+    setShowNodeEditor(false);
+    setSelectedNode(null);
+  }, []);
+
+  const handleNodeDelete = useCallback((nodeId: string) => {
+    setCurrentWorkflow(prev => ({
+      ...prev,
+      nodes: prev.nodes.filter(node => node.id !== nodeId)
+    }));
+    setShowNodeEditor(false);
+    setSelectedNode(null);
+  }, []);
+
+  // Form builder functions
+  const addFormField = useCallback(() => {
+    if (!selectedNode) return;
+
+    const newField = {
+      id: `field_${Date.now()}`,
+      label: 'New Field',
+      type: 'text' as const,
+      required: false,
+      placeholder: ''
+    };
+
+    const updatedNode = {
+      ...selectedNode,
+      data: {
+        ...selectedNode.data,
+        formConfig: {
+          ...selectedNode.data.formConfig,
+          fields: [...(selectedNode.data.formConfig?.fields || []), newField],
+          layout: selectedNode.data.formConfig?.layout || 'single'
+        }
+      }
+    };
+
+    setSelectedNode(updatedNode);
+  }, [selectedNode]);
+
+  const removeFormField = useCallback((fieldId: string) => {
+    if (!selectedNode) return;
+
+    const updatedNode = {
+      ...selectedNode,
+      data: {
+        ...selectedNode.data,
+        formConfig: {
+          ...selectedNode.data.formConfig!,
+          fields: selectedNode.data.formConfig!.fields.filter(f => f.id !== fieldId)
+        }
+      }
+    };
+
+    setSelectedNode(updatedNode);
+  }, [selectedNode]);
+
+  // Condition builder functions
+  const addCondition = useCallback(() => {
+    if (!selectedNode) return;
+
+    const newCondition = {
+      field: '',
+      operator: 'equals' as const,
+      value: '',
+      logicalOperator: 'AND' as const
+    };
+
+    const updatedNode = {
+      ...selectedNode,
+      data: {
+        ...selectedNode.data,
+        advancedConditions: [...(selectedNode.data.advancedConditions || []), newCondition]
+      }
+    };
+
+    setSelectedNode(updatedNode);
+  }, [selectedNode]);
+
+  const removeCondition = useCallback((index: number) => {
+    if (!selectedNode) return;
+
+    const updatedNode = {
+      ...selectedNode,
+      data: {
+        ...selectedNode.data,
+        advancedConditions: selectedNode.data.advancedConditions?.filter((_, i) => i !== index) || []
+      }
+    };
+
+    setSelectedNode(updatedNode);
+  }, [selectedNode]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">
+                {currentWorkflow.name}
+              </h1>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="text-xs">
+                  v{currentWorkflow.version}
+                </Badge>
+                <Badge
+                  variant={
+                    currentWorkflow.status === 'active' ? 'success' :
+                    currentWorkflow.status === 'draft' ? 'secondary' : 'destructive'
+                  }
+                  className="text-xs"
+                >
+                  {currentWorkflow.status}
+                </Badge>
+                <span className="text-xs text-gray-500">
+                  {currentWorkflow.nodes.length} nodes
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowGlobalSettings(true)}>
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Settings
+            </Button>
+            {!readOnly && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => onTest?.(currentWorkflow)}>
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1M9 6h1m4 0h1" />
+                  </svg>
+                  Test
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onSave?.(currentWorkflow)}>
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                  Save
+                </Button>
+                {currentWorkflow.status === 'draft' && (
+                  <Button size="sm" onClick={() => onPublish?.(currentWorkflow.id)}>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Publish
+                  </Button>
+                )}
+              </>
+            )}
+            <Button variant="outline" size="sm" onClick={onCancel}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Enhanced Node Palette */}
+        {!readOnly && (
+          <div className="w-80 bg-white border-r border-gray-200 p-4 overflow-y-auto">
+            <h3 className="font-medium text-gray-900 mb-4">Workflow Components</h3>
+
+            {Object.entries(nodeCategories).map(([category, nodes]) => (
+              <div key={category} className="mb-6">
+                <h4 className="text-sm font-medium text-gray-700 mb-2 capitalize">
+                  {category} Controls
+                </h4>
+                <div className="space-y-2">
+                  {nodes.map((nodeType) => (
+                    <div
+                      key={nodeType.type}
+                      draggable
+                      onDragStart={() => handleNodeDragStart(nodeType.type)}
+                      className={cn(
+                        'p-3 rounded-lg border-2 border-dashed cursor-move hover:shadow-md transition-all',
+                        nodeType.color
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{nodeType.icon}</span>
+                        <div>
+                          <div className="font-medium text-sm">{nodeType.title}</div>
+                          <div className="text-xs text-gray-600">{nodeType.description}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Workflow Properties */}
+            <div className="mt-8">
+              <h3 className="font-medium text-gray-900 mb-4">Workflow Properties</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name
+                  </label>
+                  <Input
+                    value={currentWorkflow.name}
+                    onChange={(e) => setCurrentWorkflow(prev => ({
+                      ...prev,
+                      name: e.target.value
+                    }))}
+                    className="text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={currentWorkflow.description}
+                    onChange={(e) => setCurrentWorkflow(prev => ({
+                      ...prev,
+                      description: e.target.value
+                    }))}
+                    className="w-full text-sm border rounded-md px-3 py-2"
+                    rows={3}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={currentWorkflow.category}
+                    onChange={(e) => setCurrentWorkflow(prev => ({
+                      ...prev,
+                      category: e.target.value
+                    }))}
+                    className="w-full text-sm border rounded-md px-3 py-2"
+                  >
+                    <option value="compliance">Compliance</option>
+                    <option value="risk">Risk Management</option>
+                    <option value="audit">Audit</option>
+                    <option value="operations">Operations</option>
+                    <option value="regulatory">Regulatory</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Canvas */}
+        <div className="flex-1 relative overflow-hidden">
+          <div
+            ref={canvasRef}
+            className="w-full h-full bg-gray-100 relative"
+            onDrop={handleCanvasDrop}
+            onDragOver={(e) => e.preventDefault()}
+            style={{
+              backgroundImage: `radial-gradient(circle, #e5e7eb 1px, transparent 1px)`,
+              backgroundSize: '20px 20px',
+              backgroundPosition: `${canvasOffset.x}px ${canvasOffset.y}px`
+            }}
+          >
+            {/* Zoom Controls */}
+            <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-white rounded-lg shadow-md p-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                </svg>
+              </Button>
+              <span className="text-sm font-medium px-2">
+                {Math.round(zoom * 100)}%
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setZoom(prev => Math.min(2, prev + 0.1))}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </Button>
+            </div>
+
+            {/* Workflow Nodes */}
+            <div
+              style={{
+                transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${zoom})`,
+                transformOrigin: '0 0'
+              }}
+            >
+              {currentWorkflow.nodes.map((node) => {
+                const nodeConfig = enhancedNodeTypes.find(nt => nt.type === node.type) || enhancedNodeTypes[0];
+                return (
+                  <div
+                    key={node.id}
+                    className={cn(
+                      'absolute w-48 p-4 rounded-lg border-2 bg-white shadow-md cursor-pointer hover:shadow-lg transition-all',
+                      nodeConfig.color,
+                      selectedNode?.id === node.id && 'ring-2 ring-brand-500'
+                    )}
+                    style={{
+                      left: node.position.x,
+                      top: node.position.y
+                    }}
+                    onClick={() => handleNodeClick(node)}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">{nodeConfig.icon}</span>
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{node.title}</div>
+                        <div className="text-xs text-gray-600">{nodeConfig.title}</div>
+                      </div>
+                    </div>
+                    {node.description && (
+                      <div className="text-xs text-gray-600 mt-2">
+                        {node.description}
+                      </div>
+                    )}
+                    {node.data.assignee && (
+                      <div className="text-xs text-gray-600 mt-2">
+                        Assigned to: {node.data.assignee}
+                      </div>
+                    )}
+                    {node.data.formConfig && (
+                      <div className="text-xs text-blue-600 mt-2">
+                        Form: {node.data.formConfig.fields.length} fields
+                      </div>
+                    )}
+                    {node.data.advancedConditions && node.data.advancedConditions.length > 0 && (
+                      <div className="text-xs text-purple-600 mt-2">
+                        Conditions: {node.data.advancedConditions.length}
+                      </div>
+                    )}
+                    {node.connections.length > 0 && (
+                      <div className="text-xs text-gray-500 mt-2">
+                        {node.connections.length} connection(s)
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Connection Lines */}
+              <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: -1 }}>
+                {currentWorkflow.nodes.map((node) =>
+                  node.connections.map((connection, index) => {
+                    const targetNode = currentWorkflow.nodes.find(n => n.id === connection.targetNodeId);
+                    if (!targetNode) return null;
+
+                    const startX = node.position.x + 96;
+                    const startY = node.position.y + 40;
+                    const endX = targetNode.position.x + 96;
+                    const endY = targetNode.position.y + 40;
+
+                    return (
+                      <g key={`${node.id}-${connection.targetNodeId}-${index}`}>
+                        <line
+                          x1={startX}
+                          y1={startY}
+                          x2={endX}
+                          y2={endY}
+                          stroke="#6b7280"
+                          strokeWidth="2"
+                          markerEnd="url(#arrowhead)"
+                        />
+                        {connection.label && (
+                          <text
+                            x={(startX + endX) / 2}
+                            y={(startY + endY) / 2 - 5}
+                            textAnchor="middle"
+                            className="text-xs fill-gray-600"
+                          >
+                            {connection.label}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })
+                )}
+                <defs>
+                  <marker
+                    id="arrowhead"
+                    markerWidth="10"
+                    markerHeight="7"
+                    refX="9"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <polygon
+                      points="0 0, 10 3.5, 0 7"
+                      fill="#6b7280"
+                    />
+                  </marker>
+                </defs>
+              </svg>
+            </div>
+
+            {/* Empty State */}
+            {currentWorkflow.nodes.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-6xl mb-4">🔧</div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    Start Building Your Enhanced Workflow
+                  </h3>
+                  <p className="text-gray-600 mb-4">
+                    Drag components from the palette to create your advanced compliance workflow
+                  </p>
+                  {!readOnly && (
+                    <div className="text-sm text-gray-500">
+                      Use enhanced features like forms, conditions, and integrations
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Enhanced Node Editor Modal */}
+      {showNodeEditor && selectedNode && (
+        <Modal
+          open={showNodeEditor}
+          onClose={() => setShowNodeEditor(false)}
+          title={`Edit ${enhancedNodeTypes.find(nt => nt.type === selectedNode.type)?.title} Node`}
+          size="xl"
+        >
+          <div className="space-y-6">
+            {/* Editor Tabs */}
+            <div className="flex items-center gap-2 border-b">
+              {[
+                { id: 'basic', label: 'Basic', icon: '⚙️' },
+                { id: 'form', label: 'Form', icon: '📝', show: ['form', 'task'].includes(selectedNode.type) },
+                { id: 'conditions', label: 'Conditions', icon: '🔀', show: selectedNode.type === 'condition' },
+                { id: 'integrations', label: 'Integrations', icon: '🔗', show: true },
+                { id: 'sla', label: 'SLA', icon: '⏰', show: ['task', 'approval'].includes(selectedNode.type) },
+                { id: 'scripts', label: 'Scripts', icon: '⚙️', show: selectedNode.type === 'script' }
+              ].filter(tab => tab.show !== false).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveEditorTab(tab.id as any)}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 font-medium transition-colors',
+                    activeEditorTab === tab.id
+                      ? 'text-brand-700 border-b-2 border-brand-500'
+                      : 'text-gray-600 hover:text-gray-900'
+                  )}
+                >
+                  <span>{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab Content */}
+            <div className="min-h-96">
+              {activeEditorTab === 'basic' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Title
+                    </label>
+                    <Input
+                      value={selectedNode.title}
+                      onChange={(e) => setSelectedNode(prev => prev ? {
+                        ...prev,
+                        title: e.target.value
+                      } : null)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      value={selectedNode.description}
+                      onChange={(e) => setSelectedNode(prev => prev ? {
+                        ...prev,
+                        description: e.target.value
+                      } : null)}
+                      className="w-full border rounded-md px-3 py-2"
+                      rows={3}
+                    />
+                  </div>
+
+                  {(selectedNode.type === 'task' || selectedNode.type === 'approval') && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Assignee
+                        </label>
+                        <Input
+                          value={selectedNode.data.assignee || ''}
+                          onChange={(e) => setSelectedNode(prev => prev ? {
+                            ...prev,
+                            data: { ...prev.data, assignee: e.target.value }
+                          } : null)}
+                          placeholder="Enter assignee name or role"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Priority
+                        </label>
+                        <select
+                          value={selectedNode.data.priority || 'medium'}
+                          onChange={(e) => setSelectedNode(prev => prev ? {
+                            ...prev,
+                            data: { ...prev.data, priority: e.target.value as any }
+                          } : null)}
+                          className="w-full border rounded-md px-3 py-2"
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeEditorTab === 'form' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium text-gray-900">Form Configuration</h4>
+                    <Button size="sm" onClick={addFormField}>
+                      Add Field
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {selectedNode.data.formConfig?.fields.map((field, index) => (
+                      <div key={field.id} className="p-3 border rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <Input
+                            value={field.label}
+                            onChange={(e) => {
+                              const updatedFields = [...(selectedNode.data.formConfig?.fields || [])];
+                              updatedFields[index] = { ...field, label: e.target.value };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: {
+                                  ...prev.data,
+                                  formConfig: {
+                                    ...prev.data.formConfig!,
+                                    fields: updatedFields
+                                  }
+                                }
+                              } : null);
+                            }}
+                            placeholder="Field label"
+                            className="flex-1 mr-2"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeFormField(field.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={field.type}
+                            onChange={(e) => {
+                              const updatedFields = [...(selectedNode.data.formConfig?.fields || [])];
+                              updatedFields[index] = { ...field, type: e.target.value as any };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: {
+                                  ...prev.data,
+                                  formConfig: {
+                                    ...prev.data.formConfig!,
+                                    fields: updatedFields
+                                  }
+                                }
+                              } : null);
+                            }}
+                            className="border rounded px-2 py-1 text-sm"
+                          >
+                            <option value="text">Text</option>
+                            <option value="number">Number</option>
+                            <option value="date">Date</option>
+                            <option value="select">Select</option>
+                            <option value="textarea">Textarea</option>
+                            <option value="file">File</option>
+                            <option value="checkbox">Checkbox</option>
+                          </select>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={field.required}
+                              onChange={(e) => {
+                                const updatedFields = [...(selectedNode.data.formConfig?.fields || [])];
+                                updatedFields[index] = { ...field, required: e.target.checked };
+                                setSelectedNode(prev => prev ? {
+                                  ...prev,
+                                  data: {
+                                    ...prev.data,
+                                    formConfig: {
+                                      ...prev.data.formConfig!,
+                                      fields: updatedFields
+                                    }
+                                  }
+                                } : null);
+                              }}
+                            />
+                            Required
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeEditorTab === 'conditions' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium text-gray-900">Advanced Conditions</h4>
+                    <Button size="sm" onClick={addCondition}>
+                      Add Condition
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {selectedNode.data.advancedConditions?.map((condition, index) => (
+                      <div key={index} className="p-3 border rounded-lg">
+                        <div className="grid grid-cols-4 gap-2 mb-2">
+                          <Input
+                            value={condition.field}
+                            onChange={(e) => {
+                              const updatedConditions = [...(selectedNode.data.advancedConditions || [])];
+                              updatedConditions[index] = { ...condition, field: e.target.value };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: { ...prev.data, advancedConditions: updatedConditions }
+                              } : null);
+                            }}
+                            placeholder="Field name"
+                          />
+                          <select
+                            value={condition.operator}
+                            onChange={(e) => {
+                              const updatedConditions = [...(selectedNode.data.advancedConditions || [])];
+                              updatedConditions[index] = { ...condition, operator: e.target.value as any };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: { ...prev.data, advancedConditions: updatedConditions }
+                              } : null);
+                            }}
+                            className="border rounded px-2 py-1"
+                          >
+                            <option value="equals">Equals</option>
+                            <option value="not_equals">Not Equals</option>
+                            <option value="greater_than">Greater Than</option>
+                            <option value="less_than">Less Than</option>
+                            <option value="contains">Contains</option>
+                            <option value="in">In</option>
+                            <option value="exists">Exists</option>
+                          </select>
+                          <Input
+                            value={condition.value}
+                            onChange={(e) => {
+                              const updatedConditions = [...(selectedNode.data.advancedConditions || [])];
+                              updatedConditions[index] = { ...condition, value: e.target.value };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: { ...prev.data, advancedConditions: updatedConditions }
+                              } : null);
+                            }}
+                            placeholder="Value"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeCondition(index)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                        {index < (selectedNode.data.advancedConditions?.length || 0) - 1 && (
+                          <select
+                            value={condition.logicalOperator || 'AND'}
+                            onChange={(e) => {
+                              const updatedConditions = [...(selectedNode.data.advancedConditions || [])];
+                              updatedConditions[index] = { ...condition, logicalOperator: e.target.value as any };
+                              setSelectedNode(prev => prev ? {
+                                ...prev,
+                                data: { ...prev.data, advancedConditions: updatedConditions }
+                              } : null);
+                            }}
+                            className="border rounded px-2 py-1 text-sm"
+                          >
+                            <option value="AND">AND</option>
+                            <option value="OR">OR</option>
+                          </select>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Additional tabs would be implemented similarly */}
+            </div>
+
+            <div className="flex justify-between pt-4 border-t">
+              <Button
+                variant="destructive"
+                onClick={() => handleNodeDelete(selectedNode.id)}
+              >
+                Delete Node
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowNodeEditor(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => selectedNode && handleNodeUpdate(selectedNode)}
+                >
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+export default EnhancedWorkflowBuilder;

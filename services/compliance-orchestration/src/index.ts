@@ -3,28 +3,29 @@
  * Central workflow engine for compliance processes and task orchestration
  */
 
-import express, { Application, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import rateLimit from 'express-rate-limit';
 import { config } from '@config/index';
-import { logger } from '@utils/logger';
+import { WorkflowEngine } from '@engines/WorkflowEngine';
+import { authMiddleware } from '@middleware/auth';
 import { errorHandler, notFoundHandler } from '@middleware/errorHandler';
 import { requestLogger } from '@middleware/requestLogger';
-import { authMiddleware } from '@middleware/auth';
-import { WorkflowEngine } from '@engines/WorkflowEngine';
-import { TaskScheduler } from '@services/TaskScheduler';
 import { NotificationService } from '@services/NotificationService';
+import { TaskScheduler } from '@services/TaskScheduler';
+import { logger } from '@utils/logger';
+import compression from 'compression';
+import cors from 'cors';
+import express, { Application, NextFunction, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 
 // Import routes
-import healthRoutes from '@routes/health';
-import workflowRoutes from '@routes/workflows';
-import taskRoutes from '@routes/tasks';
-import processRoutes from '@routes/processes';
-import approvalRoutes from '@routes/approvals';
-import templateRoutes from '@routes/templates';
 import analyticsRoutes from '@routes/analytics';
+import approvalRoutes from '@routes/approvals';
+import enhancedWorkflowRoutes from '@routes/enhanced-workflows';
+import healthRoutes from '@routes/health';
+import processRoutes from '@routes/processes';
+import taskRoutes from '@routes/tasks';
+import templateRoutes from '@routes/templates';
+import workflowRoutes from '@routes/workflows';
 
 export class ComplianceOrchestrationService {
   private app: Application;
@@ -39,7 +40,7 @@ export class ComplianceOrchestrationService {
     this.workflowEngine = new WorkflowEngine();
     this.taskScheduler = new TaskScheduler();
     this.notificationService = new NotificationService();
-    
+
     this.initializeMiddleware();
     this.initializeRoutes();
     this.initializeErrorHandling();
@@ -95,7 +96,7 @@ export class ComplianceOrchestrationService {
 
     // Request ID middleware
     this.app.use((req: Request, res: Response, next: NextFunction) => {
-      req.requestId = req.headers['x-request-id'] as string || 
+      req.requestId = req.headers['x-request-id'] as string ||
                      `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       res.setHeader('X-Request-ID', req.requestId);
       next();
@@ -108,6 +109,7 @@ export class ComplianceOrchestrationService {
 
     // API routes with authentication
     this.app.use('/api/v1/workflows', authMiddleware, workflowRoutes);
+    this.app.use('/api/v1/enhanced-workflows', authMiddleware, enhancedWorkflowRoutes);
     this.app.use('/api/v1/tasks', authMiddleware, taskRoutes);
     this.app.use('/api/v1/processes', authMiddleware, processRoutes);
     this.app.use('/api/v1/approvals', authMiddleware, approvalRoutes);
@@ -122,6 +124,7 @@ export class ComplianceOrchestrationService {
         description: 'Central workflow engine for compliance processes',
         endpoints: {
           workflows: '/api/v1/workflows',
+          enhancedWorkflows: '/api/v1/enhanced-workflows',
           tasks: '/api/v1/tasks',
           processes: '/api/v1/processes',
           approvals: '/api/v1/approvals',

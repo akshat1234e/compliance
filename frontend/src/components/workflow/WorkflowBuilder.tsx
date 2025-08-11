@@ -3,19 +3,15 @@
  * Visual workflow builder with drag-and-drop interface for creating compliance workflows
  */
 
-import React from 'react'
-import { 
-  Card, 
-  CardHeader, 
-  CardTitle, 
-  CardContent,
-  Badge,
-  Button,
-  Input,
-  LoadingSpinner,
-  Modal
-} from '@/components/ui'
-import { cn } from '@/lib/utils'
+import {
+    Badge,
+    Button,
+    Input,
+    LoadingSpinner,
+    Modal
+} from '@/components/ui';
+import { cn } from '@/lib/utils';
+import React from 'react';
 
 // Types
 export interface WorkflowNode {
@@ -211,7 +207,7 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
   const handleNodeUpdate = (updatedNode: WorkflowNode) => {
     setCurrentWorkflow(prev => ({
       ...prev,
-      nodes: prev.nodes.map(node => 
+      nodes: prev.nodes.map(node =>
         node.id === updatedNode.id ? updatedNode : node
       )
     }))
@@ -268,7 +264,7 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                 <Badge variant="outline" className="text-xs">
                   v{currentWorkflow.version}
                 </Badge>
-                <Badge 
+                <Badge
                   variant={
                     currentWorkflow.status === 'active' ? 'success' :
                     currentWorkflow.status === 'draft' ? 'secondary' : 'destructive'
@@ -283,7 +279,7 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
             {!readOnly && (
               <>
@@ -583,7 +579,7 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                 } : null)}
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Description
@@ -614,7 +610,7 @@ const WorkflowBuilder: React.FC<WorkflowBuilderProps> = ({
                     placeholder="Enter assignee name or role"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Priority
