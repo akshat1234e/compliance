@@ -2,7 +2,7 @@
 # Core ML frameworks and dependencies for regulatory intelligence and risk assessment
 
 # Core ML Libraries
-numpy==1.24.3
+numpy==1.26.0
 pandas==2.0.3
 scikit-learn==1.3.0
 scipy==1.11.1

@@ -1,265 +1,232 @@
-/**
- * Integration Gateway Service
- * Seamless integration with banking cores and third-party systems
- */
-
-import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import express from 'express';
 import helmet from 'helmet';
-import compression from 'compression';
-import rateLimit from 'express-rate-limit';
-import { config } from '@config/index';
-import { logger } from '@utils/logger';
-import { errorHandler, notFoundHandler } from '@middleware/errorHandler';
-import { requestLogger } from '@middleware/requestLogger';
-import { authMiddleware } from '@middleware/auth';
-import { IntegrationEngine } from '@services/IntegrationEngine';
-import { DataTransformer } from '@services/DataTransformer';
-import { ConnectionManager } from '@services/ConnectionManager';
-import { EventProcessor } from '@services/EventProcessor';
+import { errorHandler } from './middleware/errorMiddleware';
+import { requestLogger } from './middleware/requestLogger';
+import gatewayRoutes from './routes/gatewayRoutes';
+import webhookRoutes from './routes/webhooks';
+import { ConnectorHealthIntegration } from './services/ConnectorHealthIntegration';
+import { DataTransformationEngine } from './services/DataTransformationEngine';
+import { GatewayService } from './services/GatewayService';
+import { HealthCheckService } from './services/HealthCheckService';
+import { MonitoringService } from './services/MonitoringService';
+import { WebhookIntegrationService } from './services/WebhookIntegrationService';
+import { WebhookManager } from './services/WebhookManager';
+import logger from './utils/logger';
 
-// Import routes
-import healthRoutes from '@routes/health';
-import integrationRoutes from '@routes/integration';
-import connectionRoutes from '@routes/connection';
-import transformationRoutes from '@routes/transformation';
-import eventRoutes from '@routes/event';
-import webhookRoutes from '@routes/webhook';
+dotenv.config();
 
-export class IntegrationGatewayService {
-  private app: Application;
-  private port: number;
-  private integrationEngine: IntegrationEngine;
-  private dataTransformer: DataTransformer;
-  private connectionManager: ConnectionManager;
-  private eventProcessor: EventProcessor;
+const app = express();
+const PORT = process.env['GATEWAY_PORT'] || 3000;
+const startTime = Date.now();
 
-  constructor() {
-    this.app = express();
-    this.port = config.port;
-    this.integrationEngine = new IntegrationEngine();
-    this.dataTransformer = new DataTransformer();
-    this.connectionManager = new ConnectionManager();
-    this.eventProcessor = new EventProcessor();
-    
-    this.initializeMiddleware();
-    this.initializeRoutes();
-    this.initializeErrorHandling();
-  }
+// Initialize services
+let gatewayService: GatewayService;
+let webhookManager: WebhookManager;
+let webhookIntegrationService: WebhookIntegrationService;
+let transformationEngine: DataTransformationEngine;
+let healthCheckService: HealthCheckService;
+let monitoringService: MonitoringService;
+let connectorHealthIntegration: ConnectorHealthIntegration;
 
-  private initializeMiddleware(): void {
-    // Security middleware
-    this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
-        },
+// Security middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env['ALLOWED_ORIGINS']?.split(',') || ['http://localhost:3000'],
+  credentials: true,
+}));
+
+// Request logging
+app.use(requestLogger);
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    const systemHealth = healthCheckService
+      ? await healthCheckService.getSystemHealth()
+      : {
+          status: 'unknown',
+          timestamp: new Date(),
+          uptime: Date.now() - startTime,
+          version: process.env['npm_package_version'] || '1.0.0',
+          environment: process.env['NODE_ENV'] || 'development',
+          checks: [],
+          summary: { total: 0, healthy: 0, unhealthy: 0, degraded: 0, unknown: 0 },
+          performance: {
+            averageResponseTime: 0,
+            totalRequests: 0,
+            errorRate: 0,
+            memoryUsage: { used: 0, total: 0, percentage: 0 },
+            cpuUsage: 0,
+          },
+        };
+
+    // Set appropriate HTTP status based on health
+    let statusCode = 200;
+    if (systemHealth.status === 'unhealthy') {
+      statusCode = 503; // Service Unavailable
+    } else if (systemHealth.status === 'degraded') {
+      statusCode = 200; // OK but with warnings
+    }
+
+    res.status(statusCode).json({
+      ...systemHealth,
+      services: {
+        gateway: gatewayService?.getConnectorStatus() || 'not initialized',
+        webhook: webhookManager?.getStats() || 'not initialized',
+        monitoring: monitoringService ? 'running' : 'not initialized',
+        healthCheck: healthCheckService ? 'running' : 'not initialized',
       },
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true,
-      },
-    }));
-
-    // CORS configuration
-    this.app.use(cors({
-      origin: config.cors.origin,
-      credentials: config.cors.credentials,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    }));
-
-    // Compression and parsing
-    this.app.use(compression());
-    this.app.use(express.json({ limit: '50mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: config.rateLimit.windowMs,
-      max: config.rateLimit.maxRequests,
-      message: {
-        error: 'Too many requests from this IP, please try again later.',
-        retryAfter: Math.ceil(config.rateLimit.windowMs / 1000),
-      },
-      standardHeaders: true,
-      legacyHeaders: false,
     });
-    this.app.use(limiter);
-
-    // Request logging
-    this.app.use(requestLogger);
-
-    // Request ID middleware
-    this.app.use((req: Request, res: Response, next: NextFunction) => {
-      req.requestId = req.headers['x-request-id'] as string || 
-                     `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      res.setHeader('X-Request-ID', req.requestId);
-      next();
+  } catch (error: any) {
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: error.message,
     });
   }
+});
 
-  private initializeRoutes(): void {
-    // Health check routes (no auth required)
-    this.app.use('/health', healthRoutes);
+// API Routes
+app.use('/api/gateway', gatewayRoutes);
+app.use('/api/webhooks', webhookRoutes);
+app.use('/api/monitoring', monitoringRoutes);
 
-    // Webhook routes (special auth handling)
-    this.app.use('/webhook', webhookRoutes);
+// Error handling middleware
+app.use(errorHandler);
 
-    // API routes with authentication
-    this.app.use('/api/v1/integration', authMiddleware, integrationRoutes);
-    this.app.use('/api/v1/connection', authMiddleware, connectionRoutes);
-    this.app.use('/api/v1/transformation', authMiddleware, transformationRoutes);
-    this.app.use('/api/v1/event', authMiddleware, eventRoutes);
+// Initialize and start services
+async function initializeServices() {
+  try {
+    logger.info('Initializing Integration Gateway services...');
 
-    // API documentation
-    this.app.get('/api/v1', (req: Request, res: Response) => {
-      res.json({
-        service: 'Integration Gateway Service',
-        version: '1.0.0',
-        description: 'Seamless integration with banking cores and third-party systems',
-        endpoints: {
-          integration: '/api/v1/integration',
-          connection: '/api/v1/connection',
-          transformation: '/api/v1/transformation',
-          event: '/api/v1/event',
-          webhook: '/webhook'
-        },
-        health: '/health',
-        timestamp: new Date().toISOString(),
-      });
+    // Initialize transformation engine
+    transformationEngine = new DataTransformationEngine();
+    await transformationEngine.initialize();
+
+    // Initialize health check service
+    healthCheckService = new HealthCheckService({
+      checkInterval: parseInt(process.env['HEALTH_CHECK_INTERVAL'] || '30000'),
+      timeout: parseInt(process.env['HEALTH_CHECK_TIMEOUT'] || '10000'),
+      enableAlerts: process.env['ENABLE_HEALTH_ALERTS'] === 'true',
     });
-  }
+    await healthCheckService.initialize();
 
-  private initializeErrorHandling(): void {
-    // 404 handler
-    this.app.use(notFoundHandler);
+    // Initialize monitoring service
+    monitoringService = new MonitoringService(healthCheckService, {
+      metricsRetentionDays: parseInt(process.env['METRICS_RETENTION_DAYS'] || '7'),
+      alertingEnabled: process.env['ENABLE_MONITORING_ALERTS'] === 'true',
+      performanceThresholds: {
+        responseTime: parseInt(process.env['PERFORMANCE_RESPONSE_TIME_THRESHOLD'] || '5000'),
+        errorRate: parseFloat(process.env['PERFORMANCE_ERROR_RATE_THRESHOLD'] || '0.05'),
+        throughput: parseInt(process.env['PERFORMANCE_THROUGHPUT_THRESHOLD'] || '100'),
+      },
+    });
+    await monitoringService.initialize();
 
-    // Global error handler
-    this.app.use(errorHandler);
-  }
+    // Initialize gateway service
+    gatewayService = new GatewayService();
+    await gatewayService.initialize();
 
-  private async initializeServices(): Promise<void> {
-    try {
-      logger.info('Initializing integration gateway services...');
+    // Initialize connector health integration
+    connectorHealthIntegration = new ConnectorHealthIntegration(
+      healthCheckService,
+      monitoringService,
+      gatewayService,
+      {
+        enableAutoRegistration: process.env['ENABLE_CONNECTOR_AUTO_HEALTH_CHECKS'] === 'true',
+        enablePerformanceMonitoring: process.env['ENABLE_CONNECTOR_PERFORMANCE_MONITORING'] === 'true',
+      }
+    );
+    await connectorHealthIntegration.initialize();
 
-      // Initialize connection manager
-      await this.connectionManager.initialize();
-      logger.info('✅ Connection manager initialized');
+    // Initialize webhook manager
+    webhookManager = new WebhookManager();
 
-      // Initialize data transformer
-      await this.dataTransformer.initialize();
-      logger.info('✅ Data transformer initialized');
+    // Initialize webhook integration service
+    webhookIntegrationService = new WebhookIntegrationService(
+      webhookManager,
+      gatewayService,
+      transformationEngine,
+      {
+        enableAutoEvents: process.env['ENABLE_AUTO_WEBHOOK_EVENTS'] === 'true',
+        eventBufferSize: parseInt(process.env['WEBHOOK_EVENT_BUFFER_SIZE'] || '1000'),
+        eventBatchSize: parseInt(process.env['WEBHOOK_EVENT_BATCH_SIZE'] || '10'),
+        eventFlushInterval: parseInt(process.env['WEBHOOK_EVENT_FLUSH_INTERVAL'] || '5000'),
+        enableEventFiltering: process.env['ENABLE_WEBHOOK_EVENT_FILTERING'] === 'true',
+        enableEventTransformation: process.env['ENABLE_WEBHOOK_EVENT_TRANSFORMATION'] === 'true',
+        defaultTransformationRuleId: process.env['DEFAULT_WEBHOOK_TRANSFORMATION_RULE_ID'] || undefined,
+      }
+    );
+    await webhookIntegrationService.initialize();
 
-      // Initialize integration engine
-      await this.integrationEngine.initialize();
-      logger.info('✅ Integration engine initialized');
+    logger.info('All services initialized successfully');
 
-      // Initialize event processor
-      await this.eventProcessor.initialize();
-      logger.info('✅ Event processor initialized');
-
-      logger.info('🎯 All services initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize services', error);
-      throw error;
-    }
-  }
-
-  public async start(): Promise<void> {
-    try {
-      // Initialize services first
-      await this.initializeServices();
-
-      // Start the server
-      this.app.listen(this.port, () => {
-        logger.info(`🚀 Integration Gateway Service started on port ${this.port}`);
-        logger.info(`📊 Environment: ${config.env}`);
-        logger.info(`🔗 Health check: http://localhost:${this.port}/health`);
-        logger.info(`📡 API base URL: http://localhost:${this.port}/api/v1`);
-        logger.info(`🔌 Integration Engine: Active`);
-        logger.info(`🔄 Data Transformer: Running`);
-        logger.info(`📡 Connection Manager: Enabled`);
-        logger.info(`⚡ Event Processor: Ready`);
-      });
-    } catch (error) {
-      logger.error('Failed to start service', error);
-      process.exit(1);
-    }
-  }
-
-  public async shutdown(): Promise<void> {
-    try {
-      logger.info('Shutting down Integration Gateway Service...');
-
-      // Shutdown services gracefully
-      await this.integrationEngine.shutdown();
-      await this.dataTransformer.shutdown();
-      await this.connectionManager.shutdown();
-      await this.eventProcessor.shutdown();
-
-      logger.info('✅ Service shutdown completed');
-    } catch (error) {
-      logger.error('Error during shutdown', error);
-    }
-  }
-
-  public getApp(): Application {
-    return this.app;
-  }
-
-  public getIntegrationEngine(): IntegrationEngine {
-    return this.integrationEngine;
-  }
-
-  public getDataTransformer(): DataTransformer {
-    return this.dataTransformer;
-  }
-
-  public getConnectionManager(): ConnectionManager {
-    return this.connectionManager;
-  }
-
-  public getEventProcessor(): EventProcessor {
-    return this.eventProcessor;
+  } catch (error) {
+    logger.error('Failed to initialize services', error);
+    process.exit(1);
   }
 }
 
-// Create and start the service
-const service = new IntegrationGatewayService();
-
-// Start the service
-service.start().catch((error) => {
-  logger.error('Failed to start Integration Gateway Service', error);
-  process.exit(1);
-});
-
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  await service.shutdown();
-  process.exit(0);
-});
+async function gracefulShutdown() {
+  logger.info('Received shutdown signal, gracefully shutting down...');
 
-process.on('SIGINT', async () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  await service.shutdown();
-  process.exit(0);
-});
+  try {
+    if (connectorHealthIntegration) {
+      await connectorHealthIntegration.shutdown();
+    }
+    if (webhookIntegrationService) {
+      await webhookIntegrationService.shutdown();
+    }
+    if (webhookManager) {
+      await webhookManager.shutdown();
+    }
+    if (monitoringService) {
+      await monitoringService.shutdown();
+    }
+    if (healthCheckService) {
+      await healthCheckService.shutdown();
+    }
+    if (gatewayService) {
+      await gatewayService.shutdown();
+    }
+    if (transformationEngine) {
+      await transformationEngine.shutdown();
+    }
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
+    logger.info('Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error during shutdown', error);
+    process.exit(1);
+  }
+}
+
+// Handle shutdown signals
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+// Start the server
+async function startServer() {
+  await initializeServices();
+
+  app.listen(PORT, () => {
+    logger.info(`Integration Gateway Service running on port ${PORT}`);
+    console.log(`🚀 Integration Gateway Service running on port ${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔗 Gateway API: http://localhost:${PORT}/api/gateway`);
+    console.log(`🪝 Webhook API: http://localhost:${PORT}/api/webhooks`);
+    console.log(`📈 Monitoring API: http://localhost:${PORT}/api/monitoring`);
+  });
+}
+
+startServer().catch((error) => {
+  logger.error('Failed to start server', error);
   process.exit(1);
 });
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-export default IntegrationGatewayService;

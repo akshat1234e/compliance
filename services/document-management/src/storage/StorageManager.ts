@@ -3,12 +3,19 @@
  * Unified storage interface supporting multiple cloud providers
  */
 
+import { config } from '@config/index';
+import { logger } from '@utils/logger';
+import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import path from 'path';
-import crypto from 'crypto';
-import { logger } from '@utils/logger';
-import { config } from '@config/index';
+import {
+    AWSStorageProvider,
+    AzureStorageProvider,
+    GCPStorageProvider,
+    LocalStorageProvider,
+    MinIOStorageProvider
+} from './providers';
 
 export interface StorageProvider {
   name: string;
@@ -94,7 +101,7 @@ export class StorageManager extends EventEmitter {
 
     try {
       const key = options.key || this.generateStorageKey(filePath);
-      
+
       logger.info('Uploading file to storage', {
         filePath,
         key,
@@ -251,7 +258,7 @@ export class StorageManager extends EventEmitter {
     const baseName = path.basename(fileName, extension);
     const timestamp = Date.now();
     const random = Math.random().toString(36).substr(2, 9);
-    
+
     return `documents/${timestamp}/${random}/${baseName}${extension}`;
   }
 
@@ -262,19 +269,19 @@ export class StorageManager extends EventEmitter {
     const algorithm = config.security.encryption.algorithm;
     const key = Buffer.from(config.security.encryption.key, 'utf8');
     const iv = crypto.randomBytes(16);
-    
+
     const cipher = crypto.createCipher(algorithm, key);
     const input = await fs.readFile(filePath);
-    
+
     const encrypted = Buffer.concat([
       iv,
       cipher.update(input),
       cipher.final(),
     ]);
-    
+
     const encryptedPath = `${filePath}.encrypted`;
     await fs.writeFile(encryptedPath, encrypted);
-    
+
     return encryptedPath;
   }
 
@@ -284,17 +291,17 @@ export class StorageManager extends EventEmitter {
   private async decryptFile(encryptedPath: string, outputPath: string): Promise<void> {
     const algorithm = config.security.encryption.algorithm;
     const key = Buffer.from(config.security.encryption.key, 'utf8');
-    
+
     const encrypted = await fs.readFile(encryptedPath);
     const iv = encrypted.slice(0, 16);
     const data = encrypted.slice(16);
-    
+
     const decipher = crypto.createDecipher(algorithm, key);
     const decrypted = Buffer.concat([
       decipher.update(data),
       decipher.final(),
     ]);
-    
+
     await fs.writeFile(outputPath, decrypted);
   }
 
@@ -303,10 +310,10 @@ export class StorageManager extends EventEmitter {
    */
   public async shutdown(): Promise<void> {
     logger.info('Shutting down Storage Manager...');
-    
+
     this.isInitialized = false;
     this.emit('shutdown');
-    
+
     logger.info('Storage Manager shutdown completed');
   }
 }
@@ -325,10 +332,10 @@ class LocalStorageProvider implements StorageProvider {
   public async upload(filePath: string, key: string, metadata?: Record<string, any>): Promise<string> {
     const destinationPath = path.join(config.storage.local.uploadPath, key);
     const destinationDir = path.dirname(destinationPath);
-    
+
     await fs.mkdir(destinationDir, { recursive: true });
     await fs.copyFile(filePath, destinationPath);
-    
+
     return `file://${destinationPath}`;
   }
 
@@ -360,7 +367,7 @@ class LocalStorageProvider implements StorageProvider {
   public async getMetadata(key: string): Promise<Record<string, any>> {
     const filePath = path.join(config.storage.local.uploadPath, key);
     const stats = await fs.stat(filePath);
-    
+
     return {
       size: stats.size,
       lastModified: stats.mtime,
@@ -372,28 +379,28 @@ class LocalStorageProvider implements StorageProvider {
 // Placeholder implementations for cloud providers
 class AWSStorageProvider implements StorageProvider {
   public name = 'aws';
-  
+
   public async upload(filePath: string, key: string, metadata?: Record<string, any>): Promise<string> {
     // AWS S3 implementation would go here
     throw new Error('AWS S3 provider not implemented');
   }
-  
+
   public async download(key: string, destinationPath: string): Promise<void> {
     throw new Error('AWS S3 provider not implemented');
   }
-  
+
   public async delete(key: string): Promise<void> {
     throw new Error('AWS S3 provider not implemented');
   }
-  
+
   public async exists(key: string): Promise<boolean> {
     throw new Error('AWS S3 provider not implemented');
   }
-  
+
   public async getUrl(key: string, expiresIn?: number): Promise<string> {
     throw new Error('AWS S3 provider not implemented');
   }
-  
+
   public async getMetadata(key: string): Promise<Record<string, any>> {
     throw new Error('AWS S3 provider not implemented');
   }
@@ -401,27 +408,27 @@ class AWSStorageProvider implements StorageProvider {
 
 class AzureStorageProvider implements StorageProvider {
   public name = 'azure';
-  
+
   public async upload(filePath: string, key: string, metadata?: Record<string, any>): Promise<string> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
-  
+
   public async download(key: string, destinationPath: string): Promise<void> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
-  
+
   public async delete(key: string): Promise<void> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
-  
+
   public async exists(key: string): Promise<boolean> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
-  
+
   public async getUrl(key: string, expiresIn?: number): Promise<string> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
-  
+
   public async getMetadata(key: string): Promise<Record<string, any>> {
     throw new Error('Azure Blob Storage provider not implemented');
   }
@@ -429,27 +436,27 @@ class AzureStorageProvider implements StorageProvider {
 
 class GCPStorageProvider implements StorageProvider {
   public name = 'gcp';
-  
+
   public async upload(filePath: string, key: string, metadata?: Record<string, any>): Promise<string> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
-  
+
   public async download(key: string, destinationPath: string): Promise<void> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
-  
+
   public async delete(key: string): Promise<void> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
-  
+
   public async exists(key: string): Promise<boolean> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
-  
+
   public async getUrl(key: string, expiresIn?: number): Promise<string> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
-  
+
   public async getMetadata(key: string): Promise<Record<string, any>> {
     throw new Error('Google Cloud Storage provider not implemented');
   }
@@ -457,27 +464,27 @@ class GCPStorageProvider implements StorageProvider {
 
 class MinIOStorageProvider implements StorageProvider {
   public name = 'minio';
-  
+
   public async upload(filePath: string, key: string, metadata?: Record<string, any>): Promise<string> {
     throw new Error('MinIO provider not implemented');
   }
-  
+
   public async download(key: string, destinationPath: string): Promise<void> {
     throw new Error('MinIO provider not implemented');
   }
-  
+
   public async delete(key: string): Promise<void> {
     throw new Error('MinIO provider not implemented');
   }
-  
+
   public async exists(key: string): Promise<boolean> {
     throw new Error('MinIO provider not implemented');
   }
-  
+
   public async getUrl(key: string, expiresIn?: number): Promise<string> {
     throw new Error('MinIO provider not implemented');
   }
-  
+
   public async getMetadata(key: string): Promise<Record<string, any>> {
     throw new Error('MinIO provider not implemented');
   }

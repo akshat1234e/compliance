@@ -3,32 +3,52 @@
  * Core document processing engine with OCR, classification, and metadata extraction
  */
 
-import { EventEmitter } from 'events';
-import { promises as fs } from 'fs';
-import path from 'path';
-import sharp from 'sharp';
-import pdfParse from 'pdf-parse';
-import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
-import { createWorker } from 'tesseract.js';
-import { logger } from '@utils/logger';
 import { config } from '@config/index';
 import {
-  Document,
-  DocumentMetadata,
-  ProcessingResult,
-  ProcessingStatus,
-  DocumentType,
-  ProcessingOptions,
+    DocumentType,
+    ProcessingOptions,
+    ProcessingResult,
+    ProcessingStatus
 } from '@types/document';
+import { logger } from '@utils/logger';
+import { EventEmitter } from 'events';
+import { promises as fs } from 'fs';
+import mammoth from 'mammoth';
+import path from 'path';
+import pdfParse from 'pdf-parse';
+import sharp from 'sharp';
+import { createWorker } from 'tesseract.js';
+import * as XLSX from 'xlsx';
+import { ClassificationService } from '../services/ClassificationService';
+import { OCRService } from '../services/OCRService';
+import { SearchService } from '../services/SearchService';
+import { ThumbnailService } from '../services/ThumbnailService';
+import { VersioningService } from '../services/VersioningService';
+import { StorageManager } from '../storage/StorageManager';
 
 export class DocumentProcessor extends EventEmitter {
   private isInitialized = false;
   private tesseractWorker?: Tesseract.Worker;
   private processingQueue: Map<string, ProcessingResult> = new Map();
 
+  // Integrated services
+  private ocrService: OCRService;
+  private classificationService: ClassificationService;
+  private searchService: SearchService;
+  private thumbnailService: ThumbnailService;
+  private versioningService: VersioningService;
+  private storageManager: StorageManager;
+
   constructor() {
     super();
+
+    // Initialize services
+    this.ocrService = new OCRService();
+    this.classificationService = new ClassificationService();
+    this.searchService = new SearchService();
+    this.thumbnailService = new ThumbnailService();
+    this.versioningService = new VersioningService();
+    this.storageManager = new StorageManager();
   }
 
   /**
@@ -43,7 +63,17 @@ export class DocumentProcessor extends EventEmitter {
     try {
       logger.info('Initializing Document Processor...');
 
-      // Initialize OCR worker if enabled
+      // Initialize all services
+      await Promise.all([
+        this.storageManager.initialize(),
+        this.ocrService.initialize(),
+        this.classificationService.initialize(),
+        this.searchService.initialize(),
+        this.thumbnailService.initialize(),
+        this.versioningService.initialize(),
+      ]);
+
+      // Initialize OCR worker if enabled (legacy support)
       if (config.processing.enableOCR) {
         await this.initializeOCR();
       }
@@ -222,7 +252,7 @@ export class DocumentProcessor extends EventEmitter {
       const wordResult = await mammoth.extractRawText({ buffer });
 
       result.extractedText = wordResult.value;
-      
+
       if (wordResult.messages.length > 0) {
         result.warnings = wordResult.messages.map(msg => ({
           message: msg.message,
@@ -343,7 +373,7 @@ export class DocumentProcessor extends EventEmitter {
 
       for (const size of config.processing.thumbnailSizes) {
         const thumbnailPath = this.getThumbnailPath(filePath, size.suffix);
-        
+
         await sharp(filePath)
           .resize(size.width, size.height, {
             fit: 'inside',
@@ -437,14 +467,14 @@ export class DocumentProcessor extends EventEmitter {
    */
   private getDocumentType(extension: string): DocumentType {
     const ext = extension.toLowerCase();
-    
+
     if (['.pdf'].includes(ext)) return DocumentType.PDF;
     if (['.doc', '.docx'].includes(ext)) return DocumentType.WORD;
     if (['.xls', '.xlsx'].includes(ext)) return DocumentType.EXCEL;
     if (['.ppt', '.pptx'].includes(ext)) return DocumentType.POWERPOINT;
     if (['.txt', '.csv'].includes(ext)) return DocumentType.TEXT;
     if (['.jpg', '.jpeg', '.png', '.tiff', '.bmp'].includes(ext)) return DocumentType.IMAGE;
-    
+
     return DocumentType.OTHER;
   }
 
