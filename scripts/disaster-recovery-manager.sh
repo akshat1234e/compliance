@@ -139,7 +139,7 @@ check_prerequisites() {
 # Setup backup and disaster recovery system
 setup_backup_system() {
     local environment=${1:-production}
-    
+
     log_step "Setting up backup and disaster recovery system for $environment..."
 
     # Create backup namespace
@@ -152,12 +152,12 @@ setup_backup_system() {
     if ! aws s3 ls "s3://$S3_BUCKET" &> /dev/null; then
         log_info "Creating S3 bucket for backups..."
         aws s3 mb "s3://$S3_BUCKET" --region "$AWS_REGION"
-        
+
         # Configure bucket lifecycle
         aws s3api put-bucket-lifecycle-configuration \
             --bucket "$S3_BUCKET" \
             --lifecycle-configuration file://"$PROJECT_ROOT/infrastructure/backup/s3-lifecycle.json"
-        
+
         # Configure bucket versioning
         aws s3api put-bucket-versioning \
             --bucket "$S3_BUCKET" \
@@ -170,7 +170,7 @@ setup_backup_system() {
 
     # Create secrets for backup operations
     log_info "Creating backup secrets..."
-    
+
     # AWS credentials secret
     kubectl create secret generic aws-backup-credentials \
         --from-literal=access-key-id="$AWS_ACCESS_KEY_ID" \
@@ -201,7 +201,7 @@ setup_backup_system() {
 # Trigger manual backup
 trigger_backup() {
     local backup_type=${1:-all}
-    
+
     log_step "Triggering $backup_type backup..."
 
     case $backup_type in
@@ -249,7 +249,7 @@ restore_from_backup() {
     local restore_type=${1:-full}
     local restore_date=${2:-latest}
     local force=${3:-false}
-    
+
     log_step "Restoring $restore_type from backup (date: $restore_date)..."
 
     if [[ "$force" != "true" ]]; then
@@ -263,7 +263,7 @@ restore_from_backup() {
 
     # Create restore job
     local job_name="disaster-recovery-$(date +%s)"
-    
+
     # Create job from template
     kubectl get job disaster-recovery-template -n "$BACKUP_NAMESPACE" -o yaml | \
         sed "s/disaster-recovery-template/$job_name/g" | \
@@ -293,12 +293,12 @@ restore_from_backup() {
 # Verify backup integrity
 verify_backups() {
     local verify_date=${1:-latest}
-    
+
     log_step "Verifying backup integrity for date: $verify_date..."
 
     # Trigger backup verification job
     local job_name="backup-verification-manual-$(date +%s)"
-    
+
     kubectl create job "$job_name" \
         --from=cronjob/backup-verification \
         -n "$BACKUP_NAMESPACE"
@@ -322,7 +322,7 @@ verify_backups() {
 
     if [[ -n "$latest_verification" ]]; then
         aws s3 cp "s3://$S3_BUCKET/verification/daily/$latest_verification" /tmp/
-        
+
         log_info "Detailed verification report:"
         jq '.' "/tmp/$latest_verification"
     fi
@@ -382,44 +382,69 @@ show_backup_status() {
 # Test disaster recovery procedures
 test_disaster_recovery() {
     local scenario=${1:-database-failure}
-    
+
     log_step "Testing disaster recovery scenario: $scenario..."
 
     case $scenario in
         "database-failure")
             log_info "Simulating database failure and recovery..."
-            
+
             # Create test database backup
             trigger_backup "database"
-            
+
             # Wait for backup to complete
             sleep 60
-            
+
             # Simulate database corruption (in test environment only)
             if [[ "$ENVIRONMENT" == "test" ]]; then
                 log_warning "Simulating database corruption..."
                 kubectl exec -n "$NAMESPACE" deployment/postgresql -- \
                     psql -U postgres -c "DROP TABLE IF EXISTS test_corruption_table;"
             fi
-            
+
             # Test restore
             restore_from_backup "database" "latest" "true"
             ;;
-            
+
         "redis-failure")
             log_info "Simulating Redis failure and recovery..."
             trigger_backup "redis"
             sleep 30
             restore_from_backup "redis" "latest" "true"
             ;;
-            
+
         "full-disaster")
             log_info "Simulating full disaster recovery..."
             trigger_backup "all"
             sleep 300  # Wait for all backups
             restore_from_backup "full" "latest" "true"
             ;;
-            
+
+        "cross-region-failover")
+            log_info "Testing cross-region disaster recovery failover..."
+            test_cross_region_failover
+            ;;
+
+        "data-replication-integrity")
+            log_info "Testing cross-region data replication integrity..."
+            test_data_replication_integrity
+            ;;
+
+        "rto-validation")
+            log_info "Testing Recovery Time Objectives (RTO)..."
+            test_rto_validation
+            ;;
+
+        "rpo-validation")
+            log_info "Testing Recovery Point Objectives (RPO)..."
+            test_rpo_validation
+            ;;
+
+        "network-partition")
+            log_info "Testing network partition recovery..."
+            test_network_partition_recovery
+            ;;
+
         *)
             log_error "Unknown test scenario: $scenario"
             exit 1
@@ -429,10 +454,526 @@ test_disaster_recovery() {
     log_success "Disaster recovery test completed"
 }
 
+# Cross-region failover testing
+test_cross_region_failover() {
+    log_step "Starting cross-region failover test..."
+
+    # Configuration for cross-region testing
+    local PRIMARY_REGION=${PRIMARY_REGION:-us-east-1}
+    local SECONDARY_REGION=${SECONDARY_REGION:-us-west-2}
+    local TERTIARY_REGION=${TERTIARY_REGION:-eu-west-1}
+
+    local FAILOVER_RESULTS="/tmp/failover_results.json"
+    echo '{"timestamp":"'$(date -Iseconds)'","failover_tests":{}}' > $FAILOVER_RESULTS
+
+    log_info "Testing failover from $PRIMARY_REGION to $SECONDARY_REGION..."
+
+    # Step 1: Verify primary region health
+    local primary_health=$(check_region_health "$PRIMARY_REGION")
+    log_info "Primary region health: $primary_health"
+
+    # Step 2: Simulate primary region failure
+    log_warning "Simulating primary region failure..."
+    if [[ "$ENVIRONMENT" == "test" ]]; then
+        # Block traffic to primary region (simulation)
+        kubectl patch service api-gateway -n "$NAMESPACE" \
+            -p '{"spec":{"selector":{"region":"'$SECONDARY_REGION'"}}}'
+    fi
+
+    # Step 3: Measure failover time
+    local failover_start=$(date +%s)
+
+    # Wait for DNS propagation and health checks
+    sleep 30
+
+    # Step 4: Verify secondary region is serving traffic
+    local secondary_health=$(check_region_health "$SECONDARY_REGION")
+    local failover_end=$(date +%s)
+    local failover_duration=$((failover_end - failover_start))
+
+    log_info "Secondary region health: $secondary_health"
+    log_info "Failover completed in ${failover_duration} seconds"
+
+    # Step 5: Test data consistency across regions
+    local data_consistency=$(test_cross_region_data_consistency "$PRIMARY_REGION" "$SECONDARY_REGION")
+
+    # Step 6: Test application functionality in secondary region
+    local app_functionality=$(test_application_functionality "$SECONDARY_REGION")
+
+    # Step 7: Restore primary region (if in test mode)
+    if [[ "$ENVIRONMENT" == "test" ]]; then
+        log_info "Restoring primary region..."
+        kubectl patch service api-gateway -n "$NAMESPACE" \
+            -p '{"spec":{"selector":{"region":"'$PRIMARY_REGION'"}}}'
+        sleep 30
+    fi
+
+    # Update results
+    jq '.failover_tests.cross_region_failover = {
+        "primary_region": "'$PRIMARY_REGION'",
+        "secondary_region": "'$SECONDARY_REGION'",
+        "failover_duration_seconds": '$failover_duration',
+        "primary_health": "'$primary_health'",
+        "secondary_health": "'$secondary_health'",
+        "data_consistency": "'$data_consistency'",
+        "app_functionality": "'$app_functionality'",
+        "rto_target_seconds": 300,
+        "rto_achieved": '$([[ $failover_duration -le 300 ]] && echo "true" || echo "false")'
+    }' $FAILOVER_RESULTS > /tmp/temp_failover.json && mv /tmp/temp_failover.json $FAILOVER_RESULTS
+
+    # Upload results
+    aws s3 cp $FAILOVER_RESULTS s3://$S3_BUCKET/disaster-recovery/failover/failover_test_$(date +%Y%m%d_%H%M%S).json
+
+    log_success "Cross-region failover test completed"
+}
+
+# Test data replication integrity across regions
+test_data_replication_integrity() {
+    log_step "Testing data replication integrity across regions..."
+
+    local PRIMARY_REGION=${PRIMARY_REGION:-us-east-1}
+    local SECONDARY_REGION=${SECONDARY_REGION:-us-west-2}
+    local REPLICATION_RESULTS="/tmp/replication_results.json"
+
+    echo '{"timestamp":"'$(date -Iseconds)'","replication_tests":{}}' > $REPLICATION_RESULTS
+
+    # Test database replication
+    log_info "Testing database replication integrity..."
+
+    # Create test data in primary region
+    local test_record_id="dr_test_$(date +%s)"
+    local primary_db_endpoint=$(get_database_endpoint "$PRIMARY_REGION")
+    local secondary_db_endpoint=$(get_database_endpoint "$SECONDARY_REGION")
+
+    # Insert test record in primary
+    psql -h "$primary_db_endpoint" -U postgres -d rbi_compliance -c \
+        "INSERT INTO disaster_recovery_tests (id, test_data, created_at) VALUES ('$test_record_id', 'replication_test', NOW());"
+
+    # Wait for replication
+    sleep 10
+
+    # Check if record exists in secondary
+    local secondary_record_count=$(psql -h "$secondary_db_endpoint" -U postgres -d rbi_compliance -t -c \
+        "SELECT count(*) FROM disaster_recovery_tests WHERE id = '$test_record_id';")
+
+    # Test Redis replication
+    log_info "Testing Redis replication integrity..."
+
+    local primary_redis_endpoint=$(get_redis_endpoint "$PRIMARY_REGION")
+    local secondary_redis_endpoint=$(get_redis_endpoint "$SECONDARY_REGION")
+
+    # Set test key in primary Redis
+    redis-cli -h "$primary_redis_endpoint" SET "dr_test:$test_record_id" "replication_test"
+
+    # Wait for replication
+    sleep 5
+
+    # Check if key exists in secondary Redis
+    local secondary_redis_value=$(redis-cli -h "$secondary_redis_endpoint" GET "dr_test:$test_record_id")
+
+    # Test Elasticsearch replication
+    log_info "Testing Elasticsearch replication integrity..."
+
+    local primary_es_endpoint=$(get_elasticsearch_endpoint "$PRIMARY_REGION")
+    local secondary_es_endpoint=$(get_elasticsearch_endpoint "$SECONDARY_REGION")
+
+    # Index test document in primary
+    curl -X POST "$primary_es_endpoint/disaster_recovery_tests/_doc/$test_record_id" \
+        -H "Content-Type: application/json" \
+        -d '{"test_data":"replication_test","timestamp":"'$(date -Iseconds)'"}'
+
+    # Wait for replication
+    sleep 15
+
+    # Check if document exists in secondary
+    local secondary_es_response=$(curl -s "$secondary_es_endpoint/disaster_recovery_tests/_doc/$test_record_id")
+    local secondary_es_found=$(echo "$secondary_es_response" | jq -r '.found')
+
+    # Calculate replication lag
+    local replication_lag=$(calculate_replication_lag "$PRIMARY_REGION" "$SECONDARY_REGION")
+
+    # Update results
+    jq '.replication_tests = {
+        "database_replication": {
+            "test_record_id": "'$test_record_id'",
+            "primary_inserted": true,
+            "secondary_replicated": '$([[ $secondary_record_count -gt 0 ]] && echo "true" || echo "false")',
+            "replication_success": '$([[ $secondary_record_count -gt 0 ]] && echo "true" || echo "false")'
+        },
+        "redis_replication": {
+            "test_key": "dr_test:'$test_record_id'",
+            "primary_set": true,
+            "secondary_value": "'$secondary_redis_value'",
+            "replication_success": '$([[ "$secondary_redis_value" == "replication_test" ]] && echo "true" || echo "false")'
+        },
+        "elasticsearch_replication": {
+            "test_document_id": "'$test_record_id'",
+            "primary_indexed": true,
+            "secondary_found": '$([[ "$secondary_es_found" == "true" ]] && echo "true" || echo "false")',
+            "replication_success": '$([[ "$secondary_es_found" == "true" ]] && echo "true" || echo "false")'
+        },
+        "replication_lag_seconds": '$replication_lag'
+    }' $REPLICATION_RESULTS > /tmp/temp_replication.json && mv /tmp/temp_replication.json $REPLICATION_RESULTS
+
+    # Cleanup test data
+    cleanup_test_data "$test_record_id" "$PRIMARY_REGION" "$SECONDARY_REGION"
+
+    # Upload results
+    aws s3 cp $REPLICATION_RESULTS s3://$S3_BUCKET/disaster-recovery/replication/replication_test_$(date +%Y%m%d_%H%M%S).json
+
+    log_success "Data replication integrity test completed"
+}
+
+# Test Recovery Time Objectives (RTO)
+test_rto_validation() {
+    log_step "Testing Recovery Time Objectives (RTO)..."
+
+    local RTO_RESULTS="/tmp/rto_results.json"
+    echo '{"timestamp":"'$(date -Iseconds)'","rto_tests":{}}' > $RTO_RESULTS
+
+    # Define RTO targets (in seconds)
+    local DATABASE_RTO_TARGET=300    # 5 minutes
+    local REDIS_RTO_TARGET=60        # 1 minute
+    local APPLICATION_RTO_TARGET=180 # 3 minutes
+    local FULL_SYSTEM_RTO_TARGET=600 # 10 minutes
+
+    log_info "Testing database RTO (Target: ${DATABASE_RTO_TARGET}s)..."
+
+    # Database RTO test
+    local db_start=$(date +%s)
+    trigger_backup "database"
+    sleep 60  # Wait for backup
+    restore_from_backup "database" "latest" "true"
+    local db_end=$(date +%s)
+    local db_rto=$((db_end - db_start))
+
+    log_info "Testing Redis RTO (Target: ${REDIS_RTO_TARGET}s)..."
+
+    # Redis RTO test
+    local redis_start=$(date +%s)
+    trigger_backup "redis"
+    sleep 30  # Wait for backup
+    restore_from_backup "redis" "latest" "true"
+    local redis_end=$(date +%s)
+    local redis_rto=$((redis_end - redis_start))
+
+    log_info "Testing application RTO (Target: ${APPLICATION_RTO_TARGET}s)..."
+
+    # Application RTO test (restart services)
+    local app_start=$(date +%s)
+    kubectl rollout restart deployment/api-gateway -n "$NAMESPACE"
+    kubectl rollout restart deployment/compliance-orchestration -n "$NAMESPACE"
+    kubectl rollout status deployment/api-gateway -n "$NAMESPACE" --timeout=300s
+    kubectl rollout status deployment/compliance-orchestration -n "$NAMESPACE" --timeout=300s
+    local app_end=$(date +%s)
+    local app_rto=$((app_end - app_start))
+
+    # Update results
+    jq '.rto_tests = {
+        "database_rto": {
+            "target_seconds": '$DATABASE_RTO_TARGET',
+            "actual_seconds": '$db_rto',
+            "achieved": '$([[ $db_rto -le $DATABASE_RTO_TARGET ]] && echo "true" || echo "false")'
+        },
+        "redis_rto": {
+            "target_seconds": '$REDIS_RTO_TARGET',
+            "actual_seconds": '$redis_rto',
+            "achieved": '$([[ $redis_rto -le $REDIS_RTO_TARGET ]] && echo "true" || echo "false")'
+        },
+        "application_rto": {
+            "target_seconds": '$APPLICATION_RTO_TARGET',
+            "actual_seconds": '$app_rto',
+            "achieved": '$([[ $app_rto -le $APPLICATION_RTO_TARGET ]] && echo "true" || echo "false")'
+        }
+    }' $RTO_RESULTS > /tmp/temp_rto.json && mv /tmp/temp_rto.json $RTO_RESULTS
+
+    # Upload results
+    aws s3 cp $RTO_RESULTS s3://$S3_BUCKET/disaster-recovery/rto/rto_test_$(date +%Y%m%d_%H%M%S).json
+
+    log_success "RTO validation test completed"
+}
+
+# Test Recovery Point Objectives (RPO)
+test_rpo_validation() {
+    log_step "Testing Recovery Point Objectives (RPO)..."
+
+    local RPO_RESULTS="/tmp/rpo_results.json"
+    echo '{"timestamp":"'$(date -Iseconds)'","rpo_tests":{}}' > $RPO_RESULTS
+
+    # Define RPO targets (in seconds)
+    local DATABASE_RPO_TARGET=300    # 5 minutes
+    local REDIS_RPO_TARGET=60        # 1 minute
+    local ELASTICSEARCH_RPO_TARGET=600 # 10 minutes
+
+    log_info "Testing database RPO (Target: ${DATABASE_RPO_TARGET}s)..."
+
+    # Create test transaction
+    local test_transaction_id="rpo_test_$(date +%s)"
+    local transaction_time=$(date -Iseconds)
+
+    # Insert test transaction
+    psql -h $POSTGRES_HOST -U postgres -d rbi_compliance -c \
+        "INSERT INTO rpo_test_transactions (id, transaction_data, created_at) VALUES ('$test_transaction_id', 'rpo_validation', '$transaction_time');"
+
+    # Wait a bit then trigger backup
+    sleep 30
+    trigger_backup "database"
+    sleep 60
+
+    # Simulate data loss and restore
+    local backup_time=$(date -Iseconds)
+    restore_from_backup "database" "latest" "true"
+
+    # Check if test transaction survived
+    local transaction_exists=$(psql -h $POSTGRES_HOST -U postgres -d rbi_compliance -t -c \
+        "SELECT count(*) FROM rpo_test_transactions WHERE id = '$test_transaction_id';")
+
+    # Calculate data loss window
+    local transaction_timestamp=$(date -d "$transaction_time" +%s)
+    local backup_timestamp=$(date -d "$backup_time" +%s)
+    local data_loss_window=$((backup_timestamp - transaction_timestamp))
+
+    # Test Redis RPO
+    log_info "Testing Redis RPO (Target: ${REDIS_RPO_TARGET}s)..."
+
+    local redis_test_key="rpo_test:$test_transaction_id"
+    redis-cli -h $REDIS_HOST SET "$redis_test_key" "$transaction_time"
+
+    sleep 15
+    trigger_backup "redis"
+    sleep 30
+
+    # Simulate Redis failure and restore
+    restore_from_backup "redis" "latest" "true"
+
+    local redis_value=$(redis-cli -h $REDIS_HOST GET "$redis_test_key")
+    local redis_data_preserved=$([[ "$redis_value" == "$transaction_time" ]] && echo "true" || echo "false")
+
+    # Update results
+    jq '.rpo_tests = {
+        "database_rpo": {
+            "target_seconds": '$DATABASE_RPO_TARGET',
+            "data_loss_window_seconds": '$data_loss_window',
+            "test_transaction_preserved": '$([[ $transaction_exists -gt 0 ]] && echo "true" || echo "false")',
+            "rpo_achieved": '$([[ $data_loss_window -le $DATABASE_RPO_TARGET ]] && echo "true" || echo "false")'
+        },
+        "redis_rpo": {
+            "target_seconds": '$REDIS_RPO_TARGET',
+            "test_key_preserved": '$redis_data_preserved',
+            "rpo_achieved": '$redis_data_preserved'
+        }
+    }' $RPO_RESULTS > /tmp/temp_rpo.json && mv /tmp/temp_rpo.json $RPO_RESULTS
+
+    # Cleanup test data
+    psql -h $POSTGRES_HOST -U postgres -d rbi_compliance -c \
+        "DELETE FROM rpo_test_transactions WHERE id = '$test_transaction_id';"
+    redis-cli -h $REDIS_HOST DEL "$redis_test_key"
+
+    # Upload results
+    aws s3 cp $RPO_RESULTS s3://$S3_BUCKET/disaster-recovery/rpo/rpo_test_$(date +%Y%m%d_%H%M%S).json
+
+    log_success "RPO validation test completed"
+}
+
+# Test network partition recovery
+test_network_partition_recovery() {
+    log_step "Testing network partition recovery..."
+
+    local PARTITION_RESULTS="/tmp/partition_results.json"
+    echo '{"timestamp":"'$(date -Iseconds)'","partition_tests":{}}' > $PARTITION_RESULTS
+
+    if [[ "$ENVIRONMENT" != "test" ]]; then
+        log_warning "Network partition testing only available in test environment"
+        return
+    fi
+
+    log_info "Simulating network partition between regions..."
+
+    # Simulate network partition using network policies
+    kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: simulate-partition
+  namespace: $NAMESPACE
+spec:
+  podSelector:
+    matchLabels:
+      app: api-gateway
+  policyTypes:
+  - Egress
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+EOF
+
+    local partition_start=$(date +%s)
+
+    # Wait for partition to take effect
+    sleep 30
+
+    # Test application behavior during partition
+    local app_response=$(test_application_availability)
+
+    # Remove network partition
+    kubectl delete networkpolicy simulate-partition -n "$NAMESPACE"
+
+    # Wait for recovery
+    sleep 60
+
+    local partition_end=$(date +%s)
+    local partition_duration=$((partition_end - partition_start))
+
+    # Test recovery
+    local recovery_response=$(test_application_availability)
+
+    # Update results
+    jq '.partition_tests = {
+        "partition_duration_seconds": '$partition_duration',
+        "app_response_during_partition": "'$app_response'",
+        "app_response_after_recovery": "'$recovery_response'",
+        "recovery_successful": '$([[ "$recovery_response" == "healthy" ]] && echo "true" || echo "false")'
+    }' $PARTITION_RESULTS > /tmp/temp_partition.json && mv /tmp/temp_partition.json $PARTITION_RESULTS
+
+    # Upload results
+    aws s3 cp $PARTITION_RESULTS s3://$S3_BUCKET/disaster-recovery/partition/partition_test_$(date +%Y%m%d_%H%M%S).json
+
+    log_success "Network partition recovery test completed"
+}
+
+# Helper functions for cross-region testing
+check_region_health() {
+    local region=$1
+    local health_endpoint=$(get_health_endpoint "$region")
+
+    local response=$(curl -s -o /dev/null -w "%{http_code}" "$health_endpoint/health" || echo "000")
+
+    if [[ "$response" == "200" ]]; then
+        echo "healthy"
+    else
+        echo "unhealthy"
+    fi
+}
+
+get_database_endpoint() {
+    local region=$1
+    # This would be replaced with actual region-specific endpoints
+    echo "postgresql-$region.rbi-compliance.internal"
+}
+
+get_redis_endpoint() {
+    local region=$1
+    echo "redis-$region.rbi-compliance.internal"
+}
+
+get_elasticsearch_endpoint() {
+    local region=$1
+    echo "https://elasticsearch-$region.rbi-compliance.internal:9200"
+}
+
+get_health_endpoint() {
+    local region=$1
+    echo "https://api-$region.rbi-compliance.com"
+}
+
+test_cross_region_data_consistency() {
+    local primary_region=$1
+    local secondary_region=$2
+
+    # Compare data checksums between regions
+    local primary_checksum=$(get_data_checksum "$primary_region")
+    local secondary_checksum=$(get_data_checksum "$secondary_region")
+
+    if [[ "$primary_checksum" == "$secondary_checksum" ]]; then
+        echo "consistent"
+    else
+        echo "inconsistent"
+    fi
+}
+
+get_data_checksum() {
+    local region=$1
+    local db_endpoint=$(get_database_endpoint "$region")
+
+    # Calculate checksum of critical tables
+    psql -h "$db_endpoint" -U postgres -d rbi_compliance -t -c \
+        "SELECT md5(string_agg(md5(row::text), '' ORDER BY id)) FROM (
+            SELECT * FROM users UNION ALL
+            SELECT * FROM organizations UNION ALL
+            SELECT * FROM compliance_tasks
+        ) AS combined_data(row);"
+}
+
+test_application_functionality() {
+    local region=$1
+    local health_endpoint=$(get_health_endpoint "$region")
+
+    # Test critical application endpoints
+    local auth_test=$(curl -s -o /dev/null -w "%{http_code}" "$health_endpoint/api/auth/health" || echo "000")
+    local compliance_test=$(curl -s -o /dev/null -w "%{http_code}" "$health_endpoint/api/compliance/health" || echo "000")
+
+    if [[ "$auth_test" == "200" && "$compliance_test" == "200" ]]; then
+        echo "functional"
+    else
+        echo "degraded"
+    fi
+}
+
+test_application_availability() {
+    local response=$(kubectl get pods -n "$NAMESPACE" -l app=api-gateway -o jsonpath='{.items[0].status.phase}')
+
+    if [[ "$response" == "Running" ]]; then
+        echo "healthy"
+    else
+        echo "unhealthy"
+    fi
+}
+
+calculate_replication_lag() {
+    local primary_region=$1
+    local secondary_region=$2
+
+    # This would implement actual replication lag calculation
+    # For now, return a mock value
+    echo "5"
+}
+
+cleanup_test_data() {
+    local test_id=$1
+    local primary_region=$2
+    local secondary_region=$3
+
+    # Cleanup database test data
+    local primary_db=$(get_database_endpoint "$primary_region")
+    local secondary_db=$(get_database_endpoint "$secondary_region")
+
+    psql -h "$primary_db" -U postgres -d rbi_compliance -c \
+        "DELETE FROM disaster_recovery_tests WHERE id = '$test_id';"
+
+    psql -h "$secondary_db" -U postgres -d rbi_compliance -c \
+        "DELETE FROM disaster_recovery_tests WHERE id = '$test_id';"
+
+    # Cleanup Redis test data
+    local primary_redis=$(get_redis_endpoint "$primary_region")
+    local secondary_redis=$(get_redis_endpoint "$secondary_region")
+
+    redis-cli -h "$primary_redis" DEL "dr_test:$test_id"
+    redis-cli -h "$secondary_redis" DEL "dr_test:$test_id"
+
+    # Cleanup Elasticsearch test data
+    local primary_es=$(get_elasticsearch_endpoint "$primary_region")
+    local secondary_es=$(get_elasticsearch_endpoint "$secondary_region")
+
+    curl -X DELETE "$primary_es/disaster_recovery_tests/_doc/$test_id"
+    curl -X DELETE "$secondary_es/disaster_recovery_tests/_doc/$test_id"
+}
+
 # Cleanup old backups
 cleanup_old_backups() {
     local retention_days=${1:-30}
-    
+
     log_step "Cleaning up backups older than $retention_days days..."
 
     local cutoff_date

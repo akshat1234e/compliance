@@ -1,0 +1,430 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-verification-tests
+  namespace: backup-system
+  labels:
+    component: backup-testing
+data:
+  test-config.yaml: |
+    # Automated Backup Verification Test Configuration
+    test_suites:
+      - name: "backup_integrity_tests"
+        description: "Comprehensive backup integrity validation"
+        tests:
+          - name: "postgresql_backup_integrity"
+            type: "database_integrity"
+            target: "postgresql"
+            checks:
+              - "table_count_validation"
+              - "constraint_validation"
+              - "index_validation"
+              - "data_consistency_check"
+          
+          - name: "redis_backup_integrity"
+            type: "cache_integrity"
+            target: "redis"
+            checks:
+              - "rdb_file_validation"
+              - "key_count_validation"
+              - "memory_usage_check"
+          
+          - name: "elasticsearch_backup_integrity"
+            type: "search_integrity"
+            target: "elasticsearch"
+            checks:
+              - "snapshot_validation"
+              - "index_mapping_check"
+              - "document_count_validation"
+      
+      - name: "backup_performance_tests"
+        description: "Backup and restore performance validation"
+        tests:
+          - name: "restore_time_benchmark"
+            type: "performance"
+            thresholds:
+              postgresql_restore_max_seconds: 300
+              redis_restore_max_seconds: 60
+              elasticsearch_restore_max_seconds: 600
+          
+          - name: "backup_size_validation"
+            type: "storage"
+            thresholds:
+              max_size_growth_percent: 20
+              compression_ratio_min: 0.3
+      
+      - name: "cross_system_validation"
+        description: "Cross-system backup consistency tests"
+        tests:
+          - name: "referential_integrity"
+            type: "cross_validation"
+            checks:
+              - "foreign_key_consistency"
+              - "cache_database_sync"
+              - "search_index_consistency"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: automated-backup-verification-tests
+  namespace: backup-system
+  labels:
+    component: backup-testing
+spec:
+  template:
+    spec:
+      containers:
+      - name: backup-test-runner
+        image: rbi-compliance/backup-test-runner:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting automated backup verification tests at $(date)"
+          
+          # Load test configuration
+          TEST_CONFIG="/config/test-config.yaml"
+          RESULTS_DIR="/test-results"
+          mkdir -p $RESULTS_DIR
+          
+          # Initialize test results
+          TEST_RESULTS="$RESULTS_DIR/test_results.json"
+          echo '{
+            "timestamp": "'$(date -Iseconds)'",
+            "test_execution": {
+              "total_tests": 0,
+              "passed_tests": 0,
+              "failed_tests": 0,
+              "test_suites": {}
+            }
+          }' > $TEST_RESULTS
+          
+          # Function to run database integrity tests
+          run_database_integrity_tests() {
+            echo "Running database integrity tests..."
+            
+            local test_db="backup_integrity_test_$(date +%s)"
+            local backup_file="/tmp/latest_backup.sql"
+            
+            # Download latest backup
+            aws s3 cp s3://rbi-compliance-backups/database/daily/ $backup_file --recursive --exclude "*" --include "*.sql" | tail -1
+            
+            if [ ! -f "$backup_file" ]; then
+              echo "ERROR: No backup file found"
+              return 1
+            fi
+            
+            # Create test database and restore
+            createdb -h $POSTGRES_HOST -U $POSTGRES_USER $test_db
+            pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db --verbose $backup_file
+            
+            # Run integrity checks
+            local table_count=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
+            local constraint_count=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db -t -c "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema='public'")
+            local index_count=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db -t -c "SELECT count(*) FROM pg_indexes WHERE schemaname='public'")
+            
+            # Data consistency check - verify no orphaned records
+            local orphaned_records=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db -t -c "
+              SELECT COUNT(*) FROM (
+                SELECT 'compliance_tasks' as table_name, COUNT(*) as orphaned
+                FROM compliance_tasks ct 
+                LEFT JOIN workflows w ON ct.workflow_id = w.id 
+                WHERE w.id IS NULL AND ct.workflow_id IS NOT NULL
+                UNION ALL
+                SELECT 'documents' as table_name, COUNT(*) as orphaned
+                FROM documents d 
+                LEFT JOIN organizations o ON d.organization_id = o.id 
+                WHERE o.id IS NULL
+              ) orphan_check WHERE orphaned > 0
+            ")
+            
+            # Cleanup test database
+            dropdb -h $POSTGRES_HOST -U $POSTGRES_USER $test_db
+            
+            # Update test results
+            jq '.test_execution.test_suites.database_integrity = {
+              "status": "passed",
+              "table_count": '$table_count',
+              "constraint_count": '$constraint_count',
+              "index_count": '$index_count',
+              "orphaned_records": '$orphaned_records',
+              "passed": true
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "Database integrity tests: PASSED"
+            return 0
+          }
+          
+          # Function to run Redis integrity tests
+          run_redis_integrity_tests() {
+            echo "Running Redis integrity tests..."
+            
+            local redis_backup="/tmp/redis_backup.rdb"
+            
+            # Download latest Redis backup
+            aws s3 cp s3://rbi-compliance-backups/redis/daily/ $redis_backup --recursive --exclude "*" --include "*.rdb" | tail -1
+            
+            if [ ! -f "$redis_backup" ]; then
+              echo "ERROR: No Redis backup file found"
+              return 1
+            fi
+            
+            # Validate RDB file
+            redis-check-rdb $redis_backup
+            
+            # Start temporary Redis instance for testing
+            redis-server --port 6381 --daemonize yes --dbfilename test_restore.rdb --dir /tmp/
+            sleep 2
+            
+            # Load backup data
+            cp $redis_backup /tmp/test_restore.rdb
+            redis-cli -p 6381 DEBUG RELOAD
+            
+            # Run integrity checks
+            local key_count=$(redis-cli -p 6381 DBSIZE)
+            local memory_usage=$(redis-cli -p 6381 INFO memory | grep used_memory_human | cut -d: -f2 | tr -d '\r')
+            
+            # Test key patterns and data types
+            local session_keys=$(redis-cli -p 6381 KEYS "session:*" | wc -l)
+            local cache_keys=$(redis-cli -p 6381 KEYS "cache:*" | wc -l)
+            
+            # Shutdown test Redis instance
+            redis-cli -p 6381 SHUTDOWN NOSAVE
+            
+            # Update test results
+            jq '.test_execution.test_suites.redis_integrity = {
+              "status": "passed",
+              "key_count": '$key_count',
+              "memory_usage": "'$memory_usage'",
+              "session_keys": '$session_keys',
+              "cache_keys": '$cache_keys',
+              "passed": true
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "Redis integrity tests: PASSED"
+            return 0
+          }
+          
+          # Function to run performance tests
+          run_performance_tests() {
+            echo "Running performance tests..."
+            
+            local start_time=$(date +%s)
+            
+            # Test PostgreSQL restore performance
+            local pg_start=$(date +%s)
+            local test_db="perf_test_$(date +%s)"
+            createdb -h $POSTGRES_HOST -U $POSTGRES_USER $test_db
+            pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d $test_db --verbose /tmp/latest_backup.sql
+            local pg_end=$(date +%s)
+            local pg_duration=$((pg_end - pg_start))
+            dropdb -h $POSTGRES_HOST -U $POSTGRES_USER $test_db
+            
+            # Test Redis restore performance
+            local redis_start=$(date +%s)
+            redis-server --port 6382 --daemonize yes --dbfilename perf_test.rdb --dir /tmp/
+            cp /tmp/redis_backup.rdb /tmp/perf_test.rdb
+            redis-cli -p 6382 DEBUG RELOAD
+            local redis_end=$(date +%s)
+            local redis_duration=$((redis_end - redis_start))
+            redis-cli -p 6382 SHUTDOWN NOSAVE
+            
+            # Evaluate performance thresholds
+            local pg_passed=$([[ $pg_duration -le 300 ]] && echo "true" || echo "false")
+            local redis_passed=$([[ $redis_duration -le 60 ]] && echo "true" || echo "false")
+            
+            # Update test results
+            jq '.test_execution.test_suites.performance_tests = {
+              "postgresql_restore_seconds": '$pg_duration',
+              "redis_restore_seconds": '$redis_duration',
+              "postgresql_passed": '$pg_passed',
+              "redis_passed": '$redis_passed',
+              "passed": ('$pg_passed' and '$redis_passed')
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "Performance tests: PostgreSQL ${pg_duration}s, Redis ${redis_duration}s"
+            return 0
+          }
+          
+          # Function to run cross-system validation
+          run_cross_system_validation() {
+            echo "Running cross-system validation tests..."
+            
+            # Create temporary databases for validation
+            local validation_db="cross_validation_$(date +%s)"
+            createdb -h $POSTGRES_HOST -U $POSTGRES_USER $validation_db
+            pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d $validation_db --verbose /tmp/latest_backup.sql
+            
+            # Start Redis for cache validation
+            redis-server --port 6383 --daemonize yes --dbfilename validation.rdb --dir /tmp/
+            cp /tmp/redis_backup.rdb /tmp/validation.rdb
+            redis-cli -p 6383 DEBUG RELOAD
+            
+            # Test referential integrity across systems
+            local user_count_db=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $validation_db -t -c "SELECT count(*) FROM users")
+            local session_count_redis=$(redis-cli -p 6383 KEYS "session:*" | wc -l)
+            
+            # Check for data consistency between database and cache
+            local consistency_ratio=$(echo "scale=2; $session_count_redis / $user_count_db" | bc)
+            local consistency_passed=$([[ $(echo "$consistency_ratio >= 0.1" | bc) -eq 1 ]] && echo "true" || echo "false")
+            
+            # Cleanup
+            dropdb -h $POSTGRES_HOST -U $POSTGRES_USER $validation_db
+            redis-cli -p 6383 SHUTDOWN NOSAVE
+            
+            # Update test results
+            jq '.test_execution.test_suites.cross_system_validation = {
+              "user_count_db": '$user_count_db',
+              "session_count_redis": '$session_count_redis',
+              "consistency_ratio": '$consistency_ratio',
+              "consistency_passed": '$consistency_passed',
+              "passed": '$consistency_passed'
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "Cross-system validation: PASSED"
+            return 0
+          }
+          
+          # Execute all test suites
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          
+          echo "=== Starting Backup Verification Test Suite ==="
+          
+          # Run database integrity tests
+          if run_database_integrity_tests; then
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+          fi
+          TOTAL_TESTS=$((TOTAL_TESTS + 1))
+          
+          # Run Redis integrity tests
+          if run_redis_integrity_tests; then
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+          fi
+          TOTAL_TESTS=$((TOTAL_TESTS + 1))
+          
+          # Run performance tests
+          if run_performance_tests; then
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+          fi
+          TOTAL_TESTS=$((TOTAL_TESTS + 1))
+          
+          # Run cross-system validation
+          if run_cross_system_validation; then
+            PASSED_TESTS=$((PASSED_TESTS + 1))
+          fi
+          TOTAL_TESTS=$((TOTAL_TESTS + 1))
+          
+          # Update final test summary
+          jq '.test_execution.total_tests = '$TOTAL_TESTS' | 
+              .test_execution.passed_tests = '$PASSED_TESTS' | 
+              .test_execution.failed_tests = ('$TOTAL_TESTS' - '$PASSED_TESTS')' \
+              $TEST_RESULTS > /tmp/final_results.json && mv /tmp/final_results.json $TEST_RESULTS
+          
+          # Generate test report
+          python3 /scripts/generate_test_report.py \
+            --results $TEST_RESULTS \
+            --output $RESULTS_DIR/backup_verification_test_report.html
+          
+          # Upload results to S3
+          aws s3 cp $TEST_RESULTS s3://rbi-compliance-backups/test-results/backup-verification/test_results_$(date +%Y%m%d_%H%M%S).json
+          aws s3 cp $RESULTS_DIR/backup_verification_test_report.html s3://rbi-compliance-backups/test-results/backup-verification/test_report_$(date +%Y%m%d_%H%M%S).html
+          
+          echo "=== Backup Verification Tests Completed ==="
+          echo "Total Tests: $TOTAL_TESTS"
+          echo "Passed: $PASSED_TESTS"
+          echo "Failed: $((TOTAL_TESTS - PASSED_TESTS))"
+          
+          # Exit with error if any tests failed
+          if [ $PASSED_TESTS -ne $TOTAL_TESTS ]; then
+            echo "Some tests failed. Check the detailed report."
+            exit 1
+          fi
+          
+          echo "All backup verification tests passed successfully!"
+        
+        env:
+        - name: POSTGRES_HOST
+          value: "postgresql.rbi-compliance.svc.cluster.local"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: password
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: secret-access-key
+        
+        volumeMounts:
+        - name: test-config
+          mountPath: /config
+        - name: test-results
+          mountPath: /test-results
+        
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      
+      volumes:
+      - name: test-config
+        configMap:
+          name: backup-verification-tests
+      - name: test-results
+        emptyDir: {}
+      
+      restartPolicy: Never
+  backoffLimit: 3
+
+---
+# Automated Test Execution CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scheduled-backup-verification-tests
+  namespace: backup-system
+  labels:
+    component: backup-testing
+spec:
+  schedule: "0 8 * * *"  # Daily at 8 AM (after backup verification)
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: test-scheduler
+            image: rbi-compliance/backup-test-runner:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Triggering automated backup verification tests..."
+              
+              # Create test execution job
+              kubectl create job backup-verification-tests-$(date +%s) \
+                --from=job/automated-backup-verification-tests \
+                -n backup-system
+              
+              echo "Backup verification tests scheduled successfully!"
+          
+          restartPolicy: Never

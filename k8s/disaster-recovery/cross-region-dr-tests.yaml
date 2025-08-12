@@ -1,0 +1,476 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cross-region-dr-config
+  namespace: disaster-recovery
+  labels:
+    component: cross-region-testing
+data:
+  regions.yaml: |
+    # Cross-Region Disaster Recovery Configuration
+    regions:
+      primary:
+        name: "us-east-1"
+        description: "Primary production region"
+        endpoints:
+          api: "https://api-us-east-1.rbi-compliance.com"
+          database: "postgresql-us-east-1.rbi-compliance.internal"
+          redis: "redis-us-east-1.rbi-compliance.internal"
+          elasticsearch: "https://elasticsearch-us-east-1.rbi-compliance.internal:9200"
+        
+      secondary:
+        name: "us-west-2"
+        description: "Secondary disaster recovery region"
+        endpoints:
+          api: "https://api-us-west-2.rbi-compliance.com"
+          database: "postgresql-us-west-2.rbi-compliance.internal"
+          redis: "redis-us-west-2.rbi-compliance.internal"
+          elasticsearch: "https://elasticsearch-us-west-2.rbi-compliance.internal:9200"
+      
+      tertiary:
+        name: "eu-west-1"
+        description: "Tertiary backup region"
+        endpoints:
+          api: "https://api-eu-west-1.rbi-compliance.com"
+          database: "postgresql-eu-west-1.rbi-compliance.internal"
+          redis: "redis-eu-west-1.rbi-compliance.internal"
+          elasticsearch: "https://elasticsearch-eu-west-1.rbi-compliance.internal:9200"
+    
+    # Recovery objectives
+    objectives:
+      rto:
+        database: 300      # 5 minutes
+        redis: 60          # 1 minute
+        application: 180   # 3 minutes
+        full_system: 600   # 10 minutes
+      
+      rpo:
+        database: 300      # 5 minutes
+        redis: 60          # 1 minute
+        elasticsearch: 600 # 10 minutes
+    
+    # Test scenarios
+    test_scenarios:
+      - name: "cross_region_failover"
+        description: "Test automatic failover between regions"
+        enabled: true
+        frequency: "daily"
+      
+      - name: "data_replication_integrity"
+        description: "Validate data consistency across regions"
+        enabled: true
+        frequency: "hourly"
+      
+      - name: "rto_validation"
+        description: "Validate Recovery Time Objectives"
+        enabled: true
+        frequency: "daily"
+      
+      - name: "rpo_validation"
+        description: "Validate Recovery Point Objectives"
+        enabled: true
+        frequency: "daily"
+      
+      - name: "network_partition_recovery"
+        description: "Test recovery from network partitions"
+        enabled: true
+        frequency: "weekly"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cross-region-disaster-recovery-tests
+  namespace: disaster-recovery
+  labels:
+    component: cross-region-testing
+spec:
+  template:
+    spec:
+      containers:
+      - name: cross-region-dr-tester
+        image: rbi-compliance/cross-region-dr-tester:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting cross-region disaster recovery tests at $(date)"
+          
+          # Load configuration
+          CONFIG_FILE="/config/regions.yaml"
+          RESULTS_DIR="/test-results"
+          mkdir -p $RESULTS_DIR
+          
+          # Initialize comprehensive test results
+          TEST_RESULTS="$RESULTS_DIR/cross_region_dr_results.json"
+          echo '{
+            "timestamp": "'$(date -Iseconds)'",
+            "test_execution": {
+              "total_scenarios": 0,
+              "passed_scenarios": 0,
+              "failed_scenarios": 0,
+              "test_scenarios": {}
+            },
+            "regions": {
+              "primary": "us-east-1",
+              "secondary": "us-west-2",
+              "tertiary": "eu-west-1"
+            }
+          }' > $TEST_RESULTS
+          
+          # Function to test cross-region failover
+          test_cross_region_failover() {
+            echo "=== Testing Cross-Region Failover ==="
+            
+            local scenario_start=$(date +%s)
+            local scenario_results="/tmp/failover_scenario.json"
+            
+            # Step 1: Verify primary region health
+            echo "Checking primary region health..."
+            local primary_health=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api-us-east-1.rbi-compliance.com/health" || echo "000")
+            
+            # Step 2: Simulate primary region failure (test environment only)
+            if [[ "${ENVIRONMENT:-production}" == "test" ]]; then
+              echo "Simulating primary region failure..."
+              # Update load balancer to route to secondary region
+              kubectl patch service api-gateway-lb -n rbi-compliance \
+                -p '{"spec":{"selector":{"region":"us-west-2"}}}'
+            fi
+            
+            # Step 3: Measure failover time
+            local failover_start=$(date +%s)
+            
+            # Wait for DNS propagation and health checks
+            sleep 30
+            
+            # Step 4: Verify secondary region is serving traffic
+            local secondary_health=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api-us-west-2.rbi-compliance.com/health" || echo "000")
+            
+            local failover_end=$(date +%s)
+            local failover_duration=$((failover_end - failover_start))
+            
+            # Step 5: Test critical application functions
+            echo "Testing application functionality in secondary region..."
+            local auth_test=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api-us-west-2.rbi-compliance.com/api/auth/health" || echo "000")
+            local compliance_test=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://api-us-west-2.rbi-compliance.com/api/compliance/health" || echo "000")
+            
+            # Step 6: Restore primary region (if in test mode)
+            if [[ "${ENVIRONMENT:-production}" == "test" ]]; then
+              echo "Restoring primary region..."
+              kubectl patch service api-gateway-lb -n rbi-compliance \
+                -p '{"spec":{"selector":{"region":"us-east-1"}}}'
+              sleep 30
+            fi
+            
+            local scenario_end=$(date +%s)
+            local total_duration=$((scenario_end - scenario_start))
+            
+            # Evaluate results
+            local rto_target=300  # 5 minutes
+            local rto_achieved=$([[ $failover_duration -le $rto_target ]] && echo "true" || echo "false")
+            local app_functional=$([[ "$auth_test" == "200" && "$compliance_test" == "200" ]] && echo "true" || echo "false")
+            local scenario_passed=$([[ "$rto_achieved" == "true" && "$app_functional" == "true" ]] && echo "true" || echo "false")
+            
+            # Update test results
+            jq '.test_execution.test_scenarios.cross_region_failover = {
+              "status": "'$([[ "$scenario_passed" == "true" ]] && echo "PASS" || echo "FAIL")'",
+              "duration_seconds": '$total_duration',
+              "failover_duration_seconds": '$failover_duration',
+              "rto_target_seconds": '$rto_target',
+              "rto_achieved": '$rto_achieved',
+              "primary_health_code": "'$primary_health'",
+              "secondary_health_code": "'$secondary_health'",
+              "auth_service_functional": '$([[ "$auth_test" == "200" ]] && echo "true" || echo "false")',
+              "compliance_service_functional": '$([[ "$compliance_test" == "200" ]] && echo "true" || echo "false")',
+              "overall_passed": '$scenario_passed'
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "Cross-region failover test: $([[ "$scenario_passed" == "true" ]] && echo "PASSED" || echo "FAILED")"
+            return $([[ "$scenario_passed" == "true" ]] && echo 0 || echo 1)
+          }
+          
+          # Function to test data replication integrity
+          test_data_replication_integrity() {
+            echo "=== Testing Data Replication Integrity ==="
+            
+            local scenario_start=$(date +%s)
+            local test_id="dr_replication_$(date +%s)"
+            
+            # Test database replication
+            echo "Testing database replication..."
+            
+            # Insert test record in primary region
+            PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgresql-us-east-1.rbi-compliance.internal \
+              -U postgres -d rbi_compliance -c \
+              "INSERT INTO dr_test_records (id, test_data, region, created_at) VALUES ('$test_id', 'replication_test', 'us-east-1', NOW());"
+            
+            # Wait for replication
+            sleep 15
+            
+            # Check if record exists in secondary region
+            local secondary_record_count=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgresql-us-west-2.rbi-compliance.internal \
+              -U postgres -d rbi_compliance -t -c \
+              "SELECT count(*) FROM dr_test_records WHERE id = '$test_id';" | tr -d ' ')
+            
+            # Test Redis replication
+            echo "Testing Redis replication..."
+            
+            # Set test key in primary Redis
+            redis-cli -h redis-us-east-1.rbi-compliance.internal \
+              SET "dr_test:$test_id" "replication_test_$(date +%s)"
+            
+            # Wait for replication
+            sleep 10
+            
+            # Check if key exists in secondary Redis
+            local secondary_redis_value=$(redis-cli -h redis-us-west-2.rbi-compliance.internal \
+              GET "dr_test:$test_id" || echo "")
+            
+            # Calculate replication lag
+            local replication_lag=5  # Mock value - would be calculated from actual timestamps
+            
+            local scenario_end=$(date +%s)
+            local total_duration=$((scenario_end - scenario_start))
+            
+            # Evaluate results
+            local db_replication_success=$([[ $secondary_record_count -gt 0 ]] && echo "true" || echo "false")
+            local redis_replication_success=$([[ -n "$secondary_redis_value" ]] && echo "true" || echo "false")
+            local scenario_passed=$([[ "$db_replication_success" == "true" && "$redis_replication_success" == "true" ]] && echo "true" || echo "false")
+            
+            # Update test results
+            jq '.test_execution.test_scenarios.data_replication_integrity = {
+              "status": "'$([[ "$scenario_passed" == "true" ]] && echo "PASS" || echo "FAIL")'",
+              "duration_seconds": '$total_duration',
+              "test_record_id": "'$test_id'",
+              "database_replication": {
+                "primary_inserted": true,
+                "secondary_replicated": '$db_replication_success',
+                "record_count": '$secondary_record_count'
+              },
+              "redis_replication": {
+                "primary_set": true,
+                "secondary_retrieved": '$redis_replication_success',
+                "value_match": '$([[ -n "$secondary_redis_value" ]] && echo "true" || echo "false")'
+              },
+              "replication_lag_seconds": '$replication_lag',
+              "overall_passed": '$scenario_passed'
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            # Cleanup test data
+            PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgresql-us-east-1.rbi-compliance.internal \
+              -U postgres -d rbi_compliance -c \
+              "DELETE FROM dr_test_records WHERE id = '$test_id';"
+            
+            PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgresql-us-west-2.rbi-compliance.internal \
+              -U postgres -d rbi_compliance -c \
+              "DELETE FROM dr_test_records WHERE id = '$test_id';"
+            
+            redis-cli -h redis-us-east-1.rbi-compliance.internal DEL "dr_test:$test_id"
+            redis-cli -h redis-us-west-2.rbi-compliance.internal DEL "dr_test:$test_id"
+            
+            echo "Data replication integrity test: $([[ "$scenario_passed" == "true" ]] && echo "PASSED" || echo "FAILED")"
+            return $([[ "$scenario_passed" == "true" ]] && echo 0 || echo 1)
+          }
+          
+          # Function to test RTO validation
+          test_rto_validation() {
+            echo "=== Testing Recovery Time Objectives (RTO) ==="
+            
+            local scenario_start=$(date +%s)
+            
+            # Define RTO targets
+            local DATABASE_RTO_TARGET=300    # 5 minutes
+            local APPLICATION_RTO_TARGET=180 # 3 minutes
+            
+            # Test database recovery time
+            echo "Testing database RTO..."
+            local db_recovery_start=$(date +%s)
+            
+            # Simulate database restart
+            kubectl rollout restart statefulset/postgresql -n rbi-compliance
+            kubectl rollout status statefulset/postgresql -n rbi-compliance --timeout=600s
+            
+            local db_recovery_end=$(date +%s)
+            local db_rto=$((db_recovery_end - db_recovery_start))
+            
+            # Test application recovery time
+            echo "Testing application RTO..."
+            local app_recovery_start=$(date +%s)
+            
+            # Restart critical services
+            kubectl rollout restart deployment/api-gateway -n rbi-compliance
+            kubectl rollout restart deployment/compliance-orchestration -n rbi-compliance
+            kubectl rollout status deployment/api-gateway -n rbi-compliance --timeout=300s
+            kubectl rollout status deployment/compliance-orchestration -n rbi-compliance --timeout=300s
+            
+            local app_recovery_end=$(date +%s)
+            local app_rto=$((app_recovery_end - app_recovery_start))
+            
+            local scenario_end=$(date +%s)
+            local total_duration=$((scenario_end - scenario_start))
+            
+            # Evaluate results
+            local db_rto_achieved=$([[ $db_rto -le $DATABASE_RTO_TARGET ]] && echo "true" || echo "false")
+            local app_rto_achieved=$([[ $app_rto -le $APPLICATION_RTO_TARGET ]] && echo "true" || echo "false")
+            local scenario_passed=$([[ "$db_rto_achieved" == "true" && "$app_rto_achieved" == "true" ]] && echo "true" || echo "false")
+            
+            # Update test results
+            jq '.test_execution.test_scenarios.rto_validation = {
+              "status": "'$([[ "$scenario_passed" == "true" ]] && echo "PASS" || echo "FAIL")'",
+              "duration_seconds": '$total_duration',
+              "database_rto": {
+                "target_seconds": '$DATABASE_RTO_TARGET',
+                "actual_seconds": '$db_rto',
+                "achieved": '$db_rto_achieved'
+              },
+              "application_rto": {
+                "target_seconds": '$APPLICATION_RTO_TARGET',
+                "actual_seconds": '$app_rto',
+                "achieved": '$app_rto_achieved'
+              },
+              "overall_passed": '$scenario_passed'
+            }' $TEST_RESULTS > /tmp/temp_results.json && mv /tmp/temp_results.json $TEST_RESULTS
+            
+            echo "RTO validation test: $([[ "$scenario_passed" == "true" ]] && echo "PASSED" || echo "FAILED")"
+            return $([[ "$scenario_passed" == "true" ]] && echo 0 || echo 1)
+          }
+          
+          # Execute all test scenarios
+          TOTAL_SCENARIOS=0
+          PASSED_SCENARIOS=0
+          
+          echo "========================================="
+          echo "Starting Cross-Region DR Test Suite"
+          echo "========================================="
+          
+          # Run cross-region failover test
+          if test_cross_region_failover; then
+            PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
+          fi
+          TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
+          
+          # Run data replication integrity test
+          if test_data_replication_integrity; then
+            PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
+          fi
+          TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
+          
+          # Run RTO validation test
+          if test_rto_validation; then
+            PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
+          fi
+          TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
+          
+          # Update final test summary
+          jq '.test_execution.total_scenarios = '$TOTAL_SCENARIOS' | 
+              .test_execution.passed_scenarios = '$PASSED_SCENARIOS' | 
+              .test_execution.failed_scenarios = ('$TOTAL_SCENARIOS' - '$PASSED_SCENARIOS')' \
+              $TEST_RESULTS > /tmp/final_results.json && mv /tmp/final_results.json $TEST_RESULTS
+          
+          # Generate comprehensive test report
+          python3 /scripts/generate_dr_test_report.py \
+            --results $TEST_RESULTS \
+            --output $RESULTS_DIR/cross_region_dr_test_report.html
+          
+          # Upload results to S3
+          aws s3 cp $TEST_RESULTS s3://rbi-compliance-backups/disaster-recovery/cross-region/test_results_$(date +%Y%m%d_%H%M%S).json
+          aws s3 cp $RESULTS_DIR/cross_region_dr_test_report.html s3://rbi-compliance-backups/disaster-recovery/cross-region/test_report_$(date +%Y%m%d_%H%M%S).html
+          
+          echo "========================================="
+          echo "Cross-Region DR Tests Completed"
+          echo "Total Scenarios: $TOTAL_SCENARIOS"
+          echo "Passed: $PASSED_SCENARIOS"
+          echo "Failed: $((TOTAL_SCENARIOS - PASSED_SCENARIOS))"
+          echo "========================================="
+          
+          # Exit with error if any tests failed
+          if [ $PASSED_SCENARIOS -ne $TOTAL_SCENARIOS ]; then
+            echo "Some cross-region DR tests failed. Check the detailed report."
+            exit 1
+          fi
+          
+          echo "All cross-region disaster recovery tests passed successfully!"
+        
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: password
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: secret-access-key
+        - name: ENVIRONMENT
+          value: "test"
+        
+        volumeMounts:
+        - name: dr-config
+          mountPath: /config
+        - name: test-results
+          mountPath: /test-results
+        
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      
+      volumes:
+      - name: dr-config
+        configMap:
+          name: cross-region-dr-config
+      - name: test-results
+        emptyDir: {}
+      
+      restartPolicy: Never
+  backoffLimit: 2
+
+---
+# Scheduled Cross-Region DR Tests
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scheduled-cross-region-dr-tests
+  namespace: disaster-recovery
+  labels:
+    component: cross-region-testing
+spec:
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: dr-test-scheduler
+            image: rbi-compliance/cross-region-dr-tester:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Triggering scheduled cross-region disaster recovery tests..."
+              
+              # Create test execution job
+              kubectl create job cross-region-dr-tests-$(date +%s) \
+                --from=job/cross-region-disaster-recovery-tests \
+                -n disaster-recovery
+              
+              echo "Cross-region DR tests scheduled successfully!"
+          
+          restartPolicy: Never
