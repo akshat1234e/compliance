@@ -1,0 +1,401 @@
+# Autoscaling Monitoring Dashboard and Alerts
+# Comprehensive monitoring for all autoscaling components
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscaling-dashboard
+  namespace: rbi-compliance
+  labels:
+    grafana_dashboard: "1"
+    component: monitoring
+data:
+  autoscaling-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "RBI Compliance - Autoscaling Dashboard",
+        "tags": ["autoscaling", "kubernetes", "rbi-compliance"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "HPA Status Overview",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "count(kube_horizontalpodautoscaler_info{namespace=\"rbi-compliance\"})",
+                "legendFormat": "Total HPAs"
+              },
+              {
+                "expr": "count(kube_horizontalpodautoscaler_status_condition{namespace=\"rbi-compliance\", condition=\"ScalingActive\", status=\"true\"})",
+                "legendFormat": "Active HPAs"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Current vs Target Replicas",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"rbi-compliance\"}",
+                "legendFormat": "Current - {{horizontalpodautoscaler}}"
+              },
+              {
+                "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"rbi-compliance\"}",
+                "legendFormat": "Desired - {{horizontalpodautoscaler}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "CPU Utilization vs Target",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "kube_horizontalpodautoscaler_status_current_metrics_average_utilization{namespace=\"rbi-compliance\", metric_name=\"cpu\"}",
+                "legendFormat": "Current CPU - {{horizontalpodautoscaler}}"
+              },
+              {
+                "expr": "kube_horizontalpodautoscaler_spec_target_metric_average_utilization{namespace=\"rbi-compliance\", metric_name=\"cpu\"}",
+                "legendFormat": "Target CPU - {{horizontalpodautoscaler}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Memory Utilization vs Target",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "kube_horizontalpodautoscaler_status_current_metrics_average_utilization{namespace=\"rbi-compliance\", metric_name=\"memory\"}",
+                "legendFormat": "Current Memory - {{horizontalpodautoscaler}}"
+              },
+              {
+                "expr": "kube_horizontalpodautoscaler_spec_target_metric_average_utilization{namespace=\"rbi-compliance\", metric_name=\"memory\"}",
+                "legendFormat": "Target Memory - {{horizontalpodautoscaler}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Scaling Events",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "increase(kube_horizontalpodautoscaler_status_last_scale_time{namespace=\"rbi-compliance\"}[5m])",
+                "legendFormat": "Scale Events - {{horizontalpodautoscaler}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "VPA Recommendations",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "vpa_recommendation_cpu_cores{namespace=\"rbi-compliance\"}",
+                "legendFormat": "CPU Recommendation"
+              },
+              {
+                "expr": "vpa_recommendation_memory_bytes{namespace=\"rbi-compliance\"}",
+                "legendFormat": "Memory Recommendation"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+          },
+          {
+            "id": 7,
+            "title": "Cluster Autoscaler Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "cluster_autoscaler_nodes_count",
+                "legendFormat": "Current Nodes"
+              },
+              {
+                "expr": "cluster_autoscaler_unschedulable_pods_count",
+                "legendFormat": "Unschedulable Pods"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+          },
+          {
+            "id": 8,
+            "title": "KEDA ScaledObjects Status",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "keda_scaled_object_current_replicas{namespace=\"rbi-compliance\"}",
+                "legendFormat": "Current - {{scaled_object}}"
+              },
+              {
+                "expr": "keda_scaled_object_max_replicas{namespace=\"rbi-compliance\"}",
+                "legendFormat": "Max - {{scaled_object}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+---
+# Comprehensive Autoscaling Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: autoscaling-comprehensive-alerts
+  namespace: rbi-compliance
+  labels:
+    component: autoscaling-monitoring
+spec:
+  groups:
+  - name: autoscaling.critical
+    interval: 30s
+    rules:
+    # HPA Critical Alerts
+    - alert: HPAMaxReplicasReached
+      expr: |
+        kube_horizontalpodautoscaler_status_current_replicas{namespace="rbi-compliance"} 
+        >= 
+        kube_horizontalpodautoscaler_spec_max_replicas{namespace="rbi-compliance"}
+      for: 5m
+      labels:
+        severity: critical
+        component: hpa
+      annotations:
+        summary: "HPA {{ $labels.horizontalpodautoscaler }} at maximum replicas"
+        description: "HPA has reached maximum replicas ({{ $value }}), consider increasing limits"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/hpa-max-replicas"
+    
+    - alert: HPAScalingDisabled
+      expr: |
+        kube_horizontalpodautoscaler_status_condition{namespace="rbi-compliance", condition="AbleToScale", status="false"} == 1
+      for: 10m
+      labels:
+        severity: critical
+        component: hpa
+      annotations:
+        summary: "HPA {{ $labels.horizontalpodautoscaler }} unable to scale"
+        description: "HPA has been unable to scale for 10 minutes"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/hpa-scaling-disabled"
+    
+    # Cluster Autoscaler Critical Alerts
+    - alert: ClusterAutoscalerMaxNodesReached
+      expr: |
+        cluster_autoscaler_nodes_count >= cluster_autoscaler_max_nodes_count * 0.95
+      for: 5m
+      labels:
+        severity: critical
+        component: cluster-autoscaler
+      annotations:
+        summary: "Cluster approaching maximum node count"
+        description: "Cluster has {{ $value }} nodes, approaching maximum limit"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/cluster-max-nodes"
+    
+    - alert: UnschedulablePodsHigh
+      expr: cluster_autoscaler_unschedulable_pods_count > 10
+      for: 5m
+      labels:
+        severity: critical
+        component: cluster-autoscaler
+      annotations:
+        summary: "High number of unschedulable pods"
+        description: "{{ $value }} pods are unschedulable, cluster may need scaling"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/unschedulable-pods"
+
+  - name: autoscaling.warning
+    interval: 60s
+    rules:
+    # HPA Warning Alerts
+    - alert: HPAHighCPUUtilization
+      expr: |
+        kube_horizontalpodautoscaler_status_current_metrics_average_utilization{namespace="rbi-compliance", metric_name="cpu"} > 85
+      for: 10m
+      labels:
+        severity: warning
+        component: hpa
+      annotations:
+        summary: "High CPU utilization for {{ $labels.horizontalpodautoscaler }}"
+        description: "CPU utilization is {{ $value }}%, above 85% threshold"
+    
+    - alert: HPAHighMemoryUtilization
+      expr: |
+        kube_horizontalpodautoscaler_status_current_metrics_average_utilization{namespace="rbi-compliance", metric_name="memory"} > 90
+      for: 10m
+      labels:
+        severity: warning
+        component: hpa
+      annotations:
+        summary: "High memory utilization for {{ $labels.horizontalpodautoscaler }}"
+        description: "Memory utilization is {{ $value }}%, above 90% threshold"
+    
+    - alert: HPAFrequentScaling
+      expr: |
+        increase(kube_horizontalpodautoscaler_status_last_scale_time{namespace="rbi-compliance"}[30m]) > 5
+      for: 5m
+      labels:
+        severity: warning
+        component: hpa
+      annotations:
+        summary: "Frequent scaling for {{ $labels.horizontalpodautoscaler }}"
+        description: "HPA has scaled {{ $value }} times in 30 minutes"
+    
+    # VPA Warning Alerts
+    - alert: VPARecommendationStale
+      expr: |
+        time() - vpa_last_recommendation_time{namespace="rbi-compliance"} > 3600
+      for: 10m
+      labels:
+        severity: warning
+        component: vpa
+      annotations:
+        summary: "VPA recommendations stale for {{ $labels.vpa }}"
+        description: "VPA has not updated recommendations for over 1 hour"
+    
+    # KEDA Warning Alerts
+    - alert: KEDAScalerErrors
+      expr: |
+        increase(keda_scaler_errors_total{namespace="rbi-compliance"}[10m]) > 3
+      for: 5m
+      labels:
+        severity: warning
+        component: keda
+      annotations:
+        summary: "KEDA scaler errors for {{ $labels.scaler }}"
+        description: "KEDA scaler has {{ $value }} errors in 10 minutes"
+
+  - name: autoscaling.performance
+    interval: 120s
+    rules:
+    # Performance Monitoring
+    - record: autoscaling:hpa_efficiency
+      expr: |
+        (
+          kube_horizontalpodautoscaler_status_current_replicas{namespace="rbi-compliance"} 
+          / 
+          kube_horizontalpodautoscaler_spec_max_replicas{namespace="rbi-compliance"}
+        ) * 100
+    
+    - record: autoscaling:cluster_utilization
+      expr: |
+        (cluster_autoscaler_nodes_count / cluster_autoscaler_max_nodes_count) * 100
+    
+    - record: autoscaling:scaling_frequency
+      expr: |
+        increase(kube_horizontalpodautoscaler_status_last_scale_time{namespace="rbi-compliance"}[1h])
+
+---
+# Autoscaling Event Webhook
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoscaling-webhook-config
+  namespace: rbi-compliance
+  labels:
+    component: autoscaling-webhook
+data:
+  webhook.yaml: |
+    webhooks:
+      - name: "scaling-events"
+        url: "https://alerts.rbi-compliance.com/webhook/autoscaling"
+        events:
+          - "hpa.scale_up"
+          - "hpa.scale_down"
+          - "cluster.node_added"
+          - "cluster.node_removed"
+          - "keda.scale_to_zero"
+          - "keda.scale_from_zero"
+        headers:
+          Authorization: "Bearer ${WEBHOOK_TOKEN}"
+          Content-Type: "application/json"
+        retry:
+          attempts: 3
+          delay: "5s"
+
+---
+# ServiceMonitor for autoscaling metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: autoscaling-metrics
+  namespace: rbi-compliance
+  labels:
+    component: autoscaling-monitoring
+spec:
+  selector:
+    matchLabels:
+      component: autoscaling
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+
+---
+# Autoscaling Performance Test Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: autoscaling-performance-test
+  namespace: rbi-compliance
+  labels:
+    component: autoscaling-testing
+spec:
+  schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: performance-test
+            image: rbi-compliance/autoscaling-test:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting autoscaling performance test..."
+              
+              # Test HPA scaling
+              kubectl apply -f /tests/load-test.yaml
+              
+              # Monitor scaling behavior
+              for i in {1..30}; do
+                echo "Monitoring iteration $i"
+                kubectl get hpa -n rbi-compliance
+                kubectl get pods -n rbi-compliance
+                sleep 60
+              done
+              
+              # Cleanup
+              kubectl delete -f /tests/load-test.yaml
+              
+              echo "Autoscaling performance test completed"
+            env:
+            - name: KUBECONFIG
+              value: /etc/kubeconfig/config
+            volumeMounts:
+            - name: kubeconfig
+              mountPath: /etc/kubeconfig
+            - name: test-configs
+              mountPath: /tests
+          volumes:
+          - name: kubeconfig
+            secret:
+              secretName: kubeconfig
+          - name: test-configs
+            configMap:
+              name: autoscaling-test-configs
+          restartPolicy: OnFailure

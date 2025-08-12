@@ -1,0 +1,377 @@
+# KEDA (Kubernetes Event-driven Autoscaling) Configurations
+# Advanced autoscaling based on external metrics and events
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: auth-service-redis-scaler
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: keda-scaling
+spec:
+  scaleTargetRef:
+    name: auth-service
+  pollingInterval: 15
+  cooldownPeriod: 300
+  idleReplicaCount: 2
+  minReplicaCount: 3
+  maxReplicaCount: 20
+  
+  triggers:
+  # Redis queue depth trigger
+  - type: redis
+    metadata:
+      address: redis.rbi-compliance.svc.cluster.local:6379
+      listName: auth_requests_queue
+      listLength: "10"
+      enableTLS: "false"
+    authenticationRef:
+      name: redis-auth
+  
+  # Prometheus metrics trigger
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring.svc.cluster.local:9090
+      metricName: auth_service_pending_requests
+      threshold: "50"
+      query: sum(auth_service_pending_requests{service="auth-service"})
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: compliance-service-kafka-scaler
+  namespace: rbi-compliance
+  labels:
+    app: compliance-service
+    component: keda-scaling
+spec:
+  scaleTargetRef:
+    name: compliance-service
+  pollingInterval: 30
+  cooldownPeriod: 600
+  idleReplicaCount: 1
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  
+  triggers:
+  # Kafka consumer lag trigger
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka.rbi-compliance.svc.cluster.local:9092
+      consumerGroup: compliance-processors
+      topic: compliance-tasks
+      lagThreshold: "20"
+    authenticationRef:
+      name: kafka-auth
+  
+  # Database queue trigger
+  - type: postgresql
+    metadata:
+      connectionFromEnv: POSTGRES_CONNECTION_STRING
+      query: "SELECT COUNT(*) FROM compliance_tasks WHERE status = 'PENDING'"
+      targetQueryValue: "50"
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: integration-gateway-rabbitmq-scaler
+  namespace: rbi-compliance
+  labels:
+    app: integration-gateway
+    component: keda-scaling
+spec:
+  scaleTargetRef:
+    name: integration-gateway
+  pollingInterval: 10
+  cooldownPeriod: 180
+  idleReplicaCount: 2
+  minReplicaCount: 3
+  maxReplicaCount: 25
+  
+  triggers:
+  # RabbitMQ queue trigger
+  - type: rabbitmq
+    metadata:
+      host: amqp://rabbitmq.rbi-compliance.svc.cluster.local:5672
+      queueName: banking_integration_queue
+      queueLength: "30"
+      protocol: amqp
+    authenticationRef:
+      name: rabbitmq-auth
+  
+  # External API rate limit trigger
+  - type: external
+    metadata:
+      scalerAddress: external-scaler.rbi-compliance.svc.cluster.local:8080
+      metricName: banking_api_rate_limit
+      targetValue: "80"
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: document-processor-s3-scaler
+  namespace: rbi-compliance
+  labels:
+    app: document-processor
+    component: keda-scaling
+spec:
+  scaleTargetRef:
+    name: document-processor
+  pollingInterval: 60
+  cooldownPeriod: 300
+  idleReplicaCount: 0  # Scale to zero when no documents
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  
+  triggers:
+  # AWS SQS trigger for document processing
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.ap-south-1.amazonaws.com/ACCOUNT_ID/document-processing-queue
+      queueLength: "5"
+      awsRegion: ap-south-1
+    authenticationRef:
+      name: aws-credentials
+  
+  # S3 bucket trigger
+  - type: aws-cloudwatch
+    metadata:
+      namespace: AWS/S3
+      metricName: NumberOfObjects
+      dimensionName: BucketName
+      dimensionValue: rbi-compliance-documents
+      targetMetricValue: "100"
+      minMetricValue: "0"
+      awsRegion: ap-south-1
+    authenticationRef:
+      name: aws-credentials
+
+---
+# KEDA Authentication configurations
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-auth
+  namespace: rbi-compliance
+  labels:
+    app: keda-auth
+type: Opaque
+data:
+  password: <base64-encoded-redis-password>
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-auth
+  namespace: rbi-compliance
+spec:
+  secretTargetRef:
+  - parameter: password
+    name: redis-auth
+    key: password
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-auth
+  namespace: rbi-compliance
+  labels:
+    app: keda-auth
+type: Opaque
+data:
+  sasl: <base64-encoded-kafka-sasl>
+  username: <base64-encoded-kafka-username>
+  password: <base64-encoded-kafka-password>
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-auth
+  namespace: rbi-compliance
+spec:
+  secretTargetRef:
+  - parameter: sasl
+    name: kafka-auth
+    key: sasl
+  - parameter: username
+    name: kafka-auth
+    key: username
+  - parameter: password
+    name: kafka-auth
+    key: password
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-auth
+  namespace: rbi-compliance
+  labels:
+    app: keda-auth
+type: Opaque
+data:
+  username: <base64-encoded-rabbitmq-username>
+  password: <base64-encoded-rabbitmq-password>
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq-auth
+  namespace: rbi-compliance
+spec:
+  secretTargetRef:
+  - parameter: username
+    name: rabbitmq-auth
+    key: username
+  - parameter: password
+    name: rabbitmq-auth
+    key: password
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: rbi-compliance
+  labels:
+    app: keda-auth
+type: Opaque
+data:
+  AWS_ACCESS_KEY_ID: <base64-encoded-access-key>
+  AWS_SECRET_ACCESS_KEY: <base64-encoded-secret-key>
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: aws-credentials
+  namespace: rbi-compliance
+spec:
+  secretTargetRef:
+  - parameter: awsAccessKeyID
+    name: aws-credentials
+    key: AWS_ACCESS_KEY_ID
+  - parameter: awsSecretAccessKey
+    name: aws-credentials
+    key: AWS_SECRET_ACCESS_KEY
+
+---
+# Custom External Scaler for Banking API Rate Limits
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-scaler
+  namespace: rbi-compliance
+  labels:
+    app: external-scaler
+    component: keda-scaling
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: external-scaler
+  template:
+    metadata:
+      labels:
+        app: external-scaler
+    spec:
+      containers:
+      - name: external-scaler
+        image: rbi-compliance/external-scaler:latest
+        ports:
+        - containerPort: 8080
+          name: grpc
+        env:
+        - name: BANKING_API_ENDPOINT
+          value: "https://banking-api.example.com"
+        - name: RATE_LIMIT_THRESHOLD
+          value: "80"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-scaler
+  namespace: rbi-compliance
+  labels:
+    app: external-scaler
+spec:
+  selector:
+    app: external-scaler
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: grpc
+
+---
+# KEDA Operator monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: keda-operator
+  namespace: keda
+  labels:
+    app: keda-operator
+spec:
+  selector:
+    matchLabels:
+      app: keda-operator
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: keda-scaling-alerts
+  namespace: rbi-compliance
+  labels:
+    component: keda-monitoring
+spec:
+  groups:
+  - name: keda.scaling
+    rules:
+    - alert: KEDAScalerError
+      expr: increase(keda_scaler_errors_total[5m]) > 0
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "KEDA scaler experiencing errors"
+        description: "KEDA scaler {{ $labels.scaler }} has {{ $value }} errors in the last 5 minutes"
+    
+    - alert: KEDAScaledObjectNotActive
+      expr: keda_scaled_object_active == 0
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "KEDA ScaledObject not active"
+        description: "ScaledObject {{ $labels.scaled_object }} has been inactive for 10 minutes"
+    
+    - alert: KEDAMaxReplicasReached
+      expr: |
+        keda_scaled_object_current_replicas >= keda_scaled_object_max_replicas
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "KEDA ScaledObject at maximum replicas"
+        description: "ScaledObject {{ $labels.scaled_object }} has reached maximum replicas"

@@ -1,0 +1,575 @@
+# Load Balancing Monitoring and Alerting
+# Comprehensive monitoring for all load balancing components
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-balancing-dashboard
+  namespace: rbi-compliance
+  labels:
+    grafana_dashboard: "1"
+    component: load-balancing-monitoring
+data:
+  load-balancing-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "RBI Compliance - Load Balancing Dashboard",
+        "tags": ["load-balancing", "nginx", "istio", "rbi-compliance"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Rate by Service",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_ingress_controller_requests[5m])) by (service)",
+                "legendFormat": "{{service}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Response Time Percentiles",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service))",
+                "legendFormat": "50th - {{service}}"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service))",
+                "legendFormat": "95th - {{service}}"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service))",
+                "legendFormat": "99th - {{service}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Load Balancer Health",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "nginx_ingress_controller_nginx_process_resident_memory_bytes / 1024 / 1024",
+                "legendFormat": "Memory Usage (MB)"
+              },
+              {
+                "expr": "rate(nginx_ingress_controller_nginx_process_cpu_seconds_total[5m]) * 100",
+                "legendFormat": "CPU Usage (%)"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Connection Metrics",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "nginx_ingress_controller_nginx_process_connections",
+                "legendFormat": "Active Connections"
+              },
+              {
+                "expr": "nginx_ingress_controller_nginx_process_connections_total",
+                "legendFormat": "Total Connections"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Error Rate by Service",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_ingress_controller_requests{status=~\"5..\"}[5m])) by (service) / sum(rate(nginx_ingress_controller_requests[5m])) by (service) * 100",
+                "legendFormat": "5xx Error Rate - {{service}}"
+              },
+              {
+                "expr": "sum(rate(nginx_ingress_controller_requests{status=~\"4..\"}[5m])) by (service) / sum(rate(nginx_ingress_controller_requests[5m])) by (service) * 100",
+                "legendFormat": "4xx Error Rate - {{service}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Istio Service Mesh Metrics",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(istio_requests_total[5m])) by (destination_service_name)",
+                "legendFormat": "Request Rate - {{destination_service_name}}"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket[5m])) by (le, destination_service_name))",
+                "legendFormat": "99th Latency - {{destination_service_name}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+          },
+          {
+            "id": 7,
+            "title": "Load Balancing Algorithm Performance",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "avg_over_time(nginx_ingress_controller_request_duration_seconds[5m])",
+                "legendFormat": "Average Response Time"
+              },
+              {
+                "expr": "sum(rate(nginx_ingress_controller_requests[5m]))",
+                "legendFormat": "Total Request Rate"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32}
+          },
+          {
+            "id": 8,
+            "title": "Backend Health Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "nginx_ingress_controller_upstream_server_response_time_count",
+                "legendFormat": "Healthy Backends"
+              },
+              {
+                "expr": "nginx_ingress_controller_upstream_server_fails",
+                "legendFormat": "Failed Backends"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+---
+# Comprehensive Load Balancing Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: load-balancing-alerts
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-monitoring
+spec:
+  groups:
+  - name: load-balancing.critical
+    interval: 30s
+    rules:
+    # High error rate alerts
+    - alert: HighErrorRate
+      expr: |
+        (
+          sum(rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) by (service) /
+          sum(rate(nginx_ingress_controller_requests[5m])) by (service)
+        ) * 100 > 5
+      for: 2m
+      labels:
+        severity: critical
+        component: load-balancer
+      annotations:
+        summary: "High error rate for service {{ $labels.service }}"
+        description: "Error rate is {{ $value }}% for service {{ $labels.service }}"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/high-error-rate"
+    
+    # High response time alerts
+    - alert: HighResponseTime
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service)
+        ) > 2
+      for: 5m
+      labels:
+        severity: critical
+        component: load-balancer
+      annotations:
+        summary: "High response time for service {{ $labels.service }}"
+        description: "95th percentile response time is {{ $value }}s for service {{ $labels.service }}"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/high-response-time"
+    
+    # Load balancer down alerts
+    - alert: LoadBalancerDown
+      expr: up{job="nginx-ingress-controller"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: load-balancer
+      annotations:
+        summary: "Load balancer is down"
+        description: "NGINX Ingress Controller {{ $labels.instance }} is down"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/load-balancer-down"
+    
+    # Backend service unavailable
+    - alert: BackendServiceUnavailable
+      expr: |
+        sum(nginx_ingress_controller_upstream_server_fails) by (service) > 0
+      for: 2m
+      labels:
+        severity: critical
+        component: load-balancer
+      annotations:
+        summary: "Backend service {{ $labels.service }} has failures"
+        description: "{{ $value }} backend failures detected for service {{ $labels.service }}"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/backend-failures"
+
+  - name: load-balancing.warning
+    interval: 60s
+    rules:
+    # High connection count
+    - alert: HighConnectionCount
+      expr: nginx_ingress_controller_nginx_process_connections > 1000
+      for: 5m
+      labels:
+        severity: warning
+        component: load-balancer
+      annotations:
+        summary: "High connection count on load balancer"
+        description: "Connection count is {{ $value }} on load balancer {{ $labels.instance }}"
+    
+    # High memory usage
+    - alert: LoadBalancerHighMemoryUsage
+      expr: |
+        (nginx_ingress_controller_nginx_process_resident_memory_bytes / 1024 / 1024) > 1024
+      for: 10m
+      labels:
+        severity: warning
+        component: load-balancer
+      annotations:
+        summary: "High memory usage on load balancer"
+        description: "Memory usage is {{ $value }}MB on load balancer {{ $labels.instance }}"
+    
+    # High CPU usage
+    - alert: LoadBalancerHighCPUUsage
+      expr: |
+        rate(nginx_ingress_controller_nginx_process_cpu_seconds_total[5m]) * 100 > 80
+      for: 10m
+      labels:
+        severity: warning
+        component: load-balancer
+      annotations:
+        summary: "High CPU usage on load balancer"
+        description: "CPU usage is {{ $value }}% on load balancer {{ $labels.instance }}"
+    
+    # Istio service mesh alerts
+    - alert: IstioHighErrorRate
+      expr: |
+        (
+          sum(rate(istio_requests_total{response_code=~"5.."}[5m])) by (destination_service_name) /
+          sum(rate(istio_requests_total[5m])) by (destination_service_name)
+        ) * 100 > 3
+      for: 3m
+      labels:
+        severity: warning
+        component: istio
+      annotations:
+        summary: "High error rate in Istio service mesh"
+        description: "Error rate is {{ $value }}% for service {{ $labels.destination_service_name }}"
+    
+    - alert: IstioHighLatency
+      expr: |
+        histogram_quantile(0.99, 
+          sum(rate(istio_request_duration_milliseconds_bucket[5m])) by (le, destination_service_name)
+        ) > 1000
+      for: 5m
+      labels:
+        severity: warning
+        component: istio
+      annotations:
+        summary: "High latency in Istio service mesh"
+        description: "99th percentile latency is {{ $value }}ms for service {{ $labels.destination_service_name }}"
+
+  - name: load-balancing.performance
+    interval: 120s
+    rules:
+    # Performance recording rules
+    - record: load_balancing:request_rate
+      expr: |
+        sum(rate(nginx_ingress_controller_requests[5m])) by (service)
+    
+    - record: load_balancing:error_rate
+      expr: |
+        sum(rate(nginx_ingress_controller_requests{status=~"5.."}[5m])) by (service) /
+        sum(rate(nginx_ingress_controller_requests[5m])) by (service) * 100
+    
+    - record: load_balancing:response_time_p95
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])) by (le, service)
+        )
+    
+    - record: load_balancing:connection_utilization
+      expr: |
+        nginx_ingress_controller_nginx_process_connections /
+        nginx_ingress_controller_nginx_process_max_connections * 100
+
+---
+# ServiceMonitor for NGINX Ingress Controller
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-nginx
+  labels:
+    component: load-balancing-monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+
+---
+# ServiceMonitor for Istio
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: istio-mesh
+  namespace: istio-system
+  labels:
+    component: load-balancing-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: istiod
+  endpoints:
+  - port: http-monitoring
+    interval: 30s
+    path: /stats/prometheus
+    honorLabels: true
+
+---
+# Load Balancing Performance Test Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: load-balancing-performance-test
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-testing
+spec:
+  schedule: "0 3 * * 1"  # Weekly on Monday at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: performance-test
+            image: rbi-compliance/load-test:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting load balancing performance test..."
+              
+              # Test different load balancing algorithms
+              for algorithm in round_robin least_conn ip_hash; do
+                echo "Testing $algorithm load balancing..."
+                
+                # Apply configuration
+                kubectl patch configmap nginx-configuration -n ingress-nginx \
+                  --patch '{"data":{"load-balance":"'$algorithm'"}}'
+                
+                # Wait for configuration to apply
+                sleep 30
+                
+                # Run load test
+                wrk -t12 -c400 -d30s --latency https://api.rbi-compliance.com/api/health
+                
+                # Collect metrics
+                curl -s http://prometheus:9090/api/v1/query?query=nginx_ingress_controller_request_duration_seconds | \
+                  jq '.data.result[] | {metric: .metric, value: .value[1]}' > /tmp/metrics_$algorithm.json
+                
+                echo "Completed test for $algorithm"
+              done
+              
+              # Generate performance report
+              echo "Generating performance comparison report..."
+              python3 /scripts/generate_performance_report.py /tmp/metrics_*.json
+              
+              echo "Load balancing performance test completed"
+            env:
+            - name: KUBECONFIG
+              value: /etc/kubeconfig/config
+            volumeMounts:
+            - name: kubeconfig
+              mountPath: /etc/kubeconfig
+            - name: test-scripts
+              mountPath: /scripts
+          volumes:
+          - name: kubeconfig
+            secret:
+              secretName: kubeconfig
+          - name: test-scripts
+            configMap:
+              name: load-balancing-test-scripts
+          restartPolicy: OnFailure
+
+---
+# Load Balancing Test Scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-balancing-test-scripts
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-testing
+data:
+  generate_performance_report.py: |
+    #!/usr/bin/env python3
+    import json
+    import sys
+    import statistics
+    from datetime import datetime
+    
+    def analyze_metrics(file_path):
+        with open(file_path, 'r') as f:
+            metrics = json.load(f)
+        
+        response_times = []
+        for metric in metrics:
+            if 'response_time' in metric['metric']:
+                response_times.append(float(metric['value']))
+        
+        return {
+            'avg_response_time': statistics.mean(response_times) if response_times else 0,
+            'p95_response_time': statistics.quantiles(response_times, n=20)[18] if len(response_times) > 20 else 0,
+            'p99_response_time': statistics.quantiles(response_times, n=100)[98] if len(response_times) > 100 else 0
+        }
+    
+    def main():
+        results = {}
+        
+        for file_path in sys.argv[1:]:
+            algorithm = file_path.split('_')[-1].replace('.json', '')
+            results[algorithm] = analyze_metrics(file_path)
+        
+        # Generate report
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'test_results': results,
+            'recommendations': []
+        }
+        
+        # Add recommendations based on results
+        best_avg = min(results.items(), key=lambda x: x[1]['avg_response_time'])
+        best_p95 = min(results.items(), key=lambda x: x[1]['p95_response_time'])
+        
+        report['recommendations'].append(f"Best average response time: {best_avg[0]}")
+        report['recommendations'].append(f"Best 95th percentile: {best_p95[0]}")
+        
+        # Save report
+        with open('/tmp/load_balancing_performance_report.json', 'w') as f:
+            json.dump(report, f, indent=2)
+        
+        print("Performance report generated successfully")
+        print(json.dumps(report, indent=2))
+    
+    if __name__ == '__main__':
+        main()
+
+---
+# Load Balancing Health Check
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-balancing-health-check
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-monitoring
+data:
+  health-check.sh: |
+    #!/bin/bash
+    
+    # Load Balancing Health Check Script
+    set -euo pipefail
+    
+    # Configuration
+    NAMESPACE="rbi-compliance"
+    INGRESS_NAMESPACE="ingress-nginx"
+    THRESHOLD_RESPONSE_TIME=2.0
+    THRESHOLD_ERROR_RATE=5.0
+    
+    # Colors
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+    
+    echo "=== Load Balancing Health Check ==="
+    echo "Timestamp: $(date)"
+    echo
+    
+    # Check NGINX Ingress Controller
+    echo "Checking NGINX Ingress Controller..."
+    if kubectl get pods -n $INGRESS_NAMESPACE -l app.kubernetes.io/name=ingress-nginx | grep -q Running; then
+        echo -e "${GREEN}✓${NC} NGINX Ingress Controller is running"
+    else
+        echo -e "${RED}✗${NC} NGINX Ingress Controller is not running"
+        exit 1
+    fi
+    
+    # Check Istio components
+    echo "Checking Istio components..."
+    if kubectl get pods -n istio-system -l app=istiod | grep -q Running; then
+        echo -e "${GREEN}✓${NC} Istio control plane is running"
+    else
+        echo -e "${YELLOW}!${NC} Istio control plane is not running"
+    fi
+    
+    # Check service endpoints
+    echo "Checking service endpoints..."
+    for service in auth-service compliance-service integration-gateway api-gateway; do
+        endpoints=$(kubectl get endpoints $service -n $NAMESPACE -o jsonpath='{.subsets[*].addresses[*].ip}' | wc -w)
+        if [ $endpoints -gt 0 ]; then
+            echo -e "${GREEN}✓${NC} $service has $endpoints healthy endpoints"
+        else
+            echo -e "${RED}✗${NC} $service has no healthy endpoints"
+        fi
+    done
+    
+    # Check load balancer metrics
+    echo "Checking load balancer performance..."
+    
+    # Query Prometheus for metrics (requires prometheus-cli or curl)
+    if command -v curl &> /dev/null; then
+        # Check error rate
+        error_rate=$(curl -s "http://prometheus:9090/api/v1/query?query=load_balancing:error_rate" | \
+                    jq -r '.data.result[0].value[1] // "0"')
+        
+        if (( $(echo "$error_rate > $THRESHOLD_ERROR_RATE" | bc -l) )); then
+            echo -e "${RED}✗${NC} High error rate: ${error_rate}%"
+        else
+            echo -e "${GREEN}✓${NC} Error rate is acceptable: ${error_rate}%"
+        fi
+        
+        # Check response time
+        response_time=$(curl -s "http://prometheus:9090/api/v1/query?query=load_balancing:response_time_p95" | \
+                       jq -r '.data.result[0].value[1] // "0"')
+        
+        if (( $(echo "$response_time > $THRESHOLD_RESPONSE_TIME" | bc -l) )); then
+            echo -e "${RED}✗${NC} High response time: ${response_time}s"
+        else
+            echo -e "${GREEN}✓${NC} Response time is acceptable: ${response_time}s"
+        fi
+    else
+        echo -e "${YELLOW}!${NC} Cannot check metrics - curl not available"
+    fi
+    
+    echo
+    echo "=== Health Check Complete ==="

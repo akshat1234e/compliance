@@ -1,0 +1,571 @@
+# Asset Optimization and CDN Deployment Pipeline
+# Automated optimization and deployment of static assets to CDN
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Asset optimization and CDN deployment pipeline for RBI Compliance Platform'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  GitHubRepo:
+    Type: String
+    Default: rbi-compliance/platform
+    Description: GitHub repository
+  
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: GitHub branch
+  
+  S3BucketName:
+    Type: String
+    Default: rbi-compliance-static-assets
+    Description: S3 bucket for static assets
+  
+  CloudFrontDistributionId:
+    Type: String
+    Description: CloudFront Distribution ID
+
+Resources:
+  # CodeBuild Project for Asset Optimization
+  AssetOptimizationProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub 'rbi-compliance-asset-optimization-${Environment}'
+      Description: 'Optimize and process static assets for CDN deployment'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        EnvironmentVariables:
+        - Name: ENVIRONMENT
+          Value: !Ref Environment
+        - Name: S3_BUCKET
+          Value: !Sub '${S3BucketName}-${Environment}'
+        - Name: CLOUDFRONT_DISTRIBUTION_ID
+          Value: !Ref CloudFrontDistributionId
+        - Name: NODE_ENV
+          Value: production
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 16
+              commands:
+                # Install optimization tools
+                - npm install -g webpack webpack-cli
+                - npm install -g imagemin-cli
+                - npm install -g svgo
+                - npm install -g terser
+                - npm install -g clean-css-cli
+                - npm install -g brotli
+                - pip3 install awscli
+                
+                # Install project dependencies
+                - cd frontend && npm ci --production
+                
+            pre_build:
+              commands:
+                - echo "Starting asset optimization process..."
+                - mkdir -p optimized-assets/{js,css,images,fonts,documents}
+                
+            build:
+              commands:
+                # JavaScript Optimization
+                - echo "Optimizing JavaScript files..."
+                - find frontend/src -name "*.js" -type f | while read file; do
+                    output="optimized-assets/js/$(basename "$file" .js).min.js"
+                    terser "$file" --compress --mangle --output "$output"
+                    brotli -k "$output"
+                    gzip -k "$output"
+                  done
+                
+                # CSS Optimization
+                - echo "Optimizing CSS files..."
+                - find frontend/src -name "*.css" -type f | while read file; do
+                    output="optimized-assets/css/$(basename "$file" .css).min.css"
+                    cleancss -o "$output" "$file"
+                    brotli -k "$output"
+                    gzip -k "$output"
+                  done
+                
+                # Image Optimization
+                - echo "Optimizing images..."
+                - find frontend/src -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.webp" | while read file; do
+                    output="optimized-assets/images/$(basename "$file")"
+                    imagemin "$file" --out-dir="optimized-assets/images/"
+                  done
+                
+                # SVG Optimization
+                - find frontend/src -name "*.svg" | while read file; do
+                    output="optimized-assets/images/$(basename "$file")"
+                    svgo "$file" -o "$output"
+                  done
+                
+                # Font Optimization
+                - echo "Processing fonts..."
+                - find frontend/src -name "*.woff" -o -name "*.woff2" -o -name "*.ttf" -o -name "*.eot" | while read file; do
+                    cp "$file" "optimized-assets/fonts/"
+                  done
+                
+                # Generate WebP versions of images
+                - echo "Generating WebP images..."
+                - find optimized-assets/images -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | while read file; do
+                    cwebp "$file" -o "${file%.*}.webp" -q 85
+                  done
+                
+                # Generate AVIF versions of images
+                - echo "Generating AVIF images..."
+                - find optimized-assets/images -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | while read file; do
+                    avifenc "$file" "${file%.*}.avif" --quality 85
+                  done
+                
+                # Create responsive image variants
+                - echo "Creating responsive image variants..."
+                - find optimized-assets/images -name "*.jpg" -o -name "*.png" | while read file; do
+                    base="${file%.*}"
+                    ext="${file##*.}"
+                    
+                    # Create different sizes
+                    convert "$file" -resize 320x240 "${base}-small.${ext}"
+                    convert "$file" -resize 768x576 "${base}-medium.${ext}"
+                    convert "$file" -resize 1200x900 "${base}-large.${ext}"
+                    convert "$file" -resize 1920x1440 "${base}-xlarge.${ext}"
+                  done
+                
+                # Generate asset manifest
+                - echo "Generating asset manifest..."
+                - python3 << 'EOF'
+                  import os
+                  import json
+                  import hashlib
+                  from datetime import datetime
+                  
+                  def calculate_hash(filepath):
+                      with open(filepath, 'rb') as f:
+                          return hashlib.md5(f.read()).hexdigest()[:8]
+                  
+                  manifest = {
+                      'timestamp': datetime.now().isoformat(),
+                      'environment': os.environ['ENVIRONMENT'],
+                      'assets': {}
+                  }
+                  
+                  for root, dirs, files in os.walk('optimized-assets'):
+                      for file in files:
+                          if not file.endswith(('.br', '.gz')):
+                              filepath = os.path.join(root, file)
+                              relative_path = os.path.relpath(filepath, 'optimized-assets')
+                              file_hash = calculate_hash(filepath)
+                              file_size = os.path.getsize(filepath)
+                              
+                              manifest['assets'][relative_path] = {
+                                  'hash': file_hash,
+                                  'size': file_size,
+                                  'url': f"https://cdn.rbi-compliance.com/{relative_path}?v={file_hash}"
+                              }
+                  
+                  with open('optimized-assets/manifest.json', 'w') as f:
+                      json.dump(manifest, f, indent=2)
+                  EOF
+                
+                # Create cache control headers file
+                - echo "Creating cache control configuration..."
+                - cat > cache-control.json << 'EOF'
+                  {
+                    "js/*.js": "public, max-age=31536000, immutable",
+                    "css/*.css": "public, max-age=31536000, immutable",
+                    "images/*.{png,jpg,jpeg,gif,webp,avif}": "public, max-age=2592000",
+                    "images/*.svg": "public, max-age=31536000, immutable",
+                    "fonts/*": "public, max-age=31536000, immutable",
+                    "documents/*": "private, max-age=300",
+                    "manifest.json": "public, max-age=300"
+                  }
+                  EOF
+                
+            post_build:
+              commands:
+                # Upload to S3 with appropriate headers
+                - echo "Uploading optimized assets to S3..."
+                
+                # JavaScript files
+                - aws s3 sync optimized-assets/js/ s3://$S3_BUCKET/js/ 
+                  --content-type "application/javascript" 
+                  --content-encoding "gzip" 
+                  --cache-control "public, max-age=31536000, immutable"
+                  --metadata-directive REPLACE
+                
+                # CSS files
+                - aws s3 sync optimized-assets/css/ s3://$S3_BUCKET/css/ 
+                  --content-type "text/css" 
+                  --content-encoding "gzip" 
+                  --cache-control "public, max-age=31536000, immutable"
+                  --metadata-directive REPLACE
+                
+                # Images
+                - aws s3 sync optimized-assets/images/ s3://$S3_BUCKET/images/ 
+                  --cache-control "public, max-age=2592000"
+                  --metadata-directive REPLACE
+                
+                # Fonts
+                - aws s3 sync optimized-assets/fonts/ s3://$S3_BUCKET/fonts/ 
+                  --cache-control "public, max-age=31536000, immutable"
+                  --metadata-directive REPLACE
+                
+                # Manifest
+                - aws s3 cp optimized-assets/manifest.json s3://$S3_BUCKET/manifest.json 
+                  --content-type "application/json" 
+                  --cache-control "public, max-age=300"
+                  --metadata-directive REPLACE
+                
+                # Create CloudFront invalidation
+                - echo "Creating CloudFront invalidation..."
+                - aws cloudfront create-invalidation 
+                  --distribution-id $CLOUDFRONT_DISTRIBUTION_ID 
+                  --paths "/manifest.json" "/js/*" "/css/*"
+                
+                - echo "Asset optimization and deployment completed successfully!"
+                
+          artifacts:
+            files:
+              - optimized-assets/**/*
+              - cache-control.json
+            name: OptimizedAssets
+
+  # CodePipeline for Automated Deployment
+  AssetDeploymentPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub 'rbi-compliance-asset-pipeline-${Environment}'
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactsBucket
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: SourceAction
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Provider: GitHub
+            Version: '1'
+          Configuration:
+            Owner: !Select [0, !Split ['/', !Ref GitHubRepo]]
+            Repo: !Select [1, !Split ['/', !Ref GitHubRepo]]
+            Branch: !Ref GitHubBranch
+            OAuthToken: !Ref GitHubToken
+            PollForSourceChanges: false
+          OutputArtifacts:
+          - Name: SourceOutput
+
+      - Name: Build
+        Actions:
+        - Name: OptimizeAssets
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: '1'
+          Configuration:
+            ProjectName: !Ref AssetOptimizationProject
+          InputArtifacts:
+          - Name: SourceOutput
+          OutputArtifacts:
+          - Name: OptimizedAssets
+
+      - Name: Deploy
+        Actions:
+        - Name: DeployToCDN
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Provider: S3
+            Version: '1'
+          Configuration:
+            BucketName: !Sub '${S3BucketName}-${Environment}'
+            Extract: true
+            ObjectKey: ''
+          InputArtifacts:
+          - Name: OptimizedAssets
+          RunOrder: 1
+
+        - Name: InvalidateCloudFront
+          ActionTypeId:
+            Category: Invoke
+            Owner: AWS
+            Provider: Lambda
+            Version: '1'
+          Configuration:
+            FunctionName: !Ref CloudFrontInvalidationFunction
+          InputArtifacts:
+          - Name: OptimizedAssets
+          RunOrder: 2
+
+  # Lambda Function for CloudFront Invalidation
+  CloudFrontInvalidationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'rbi-compliance-cloudfront-invalidation-${Environment}'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          DISTRIBUTION_ID: !Ref CloudFrontDistributionId
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+          
+          def lambda_handler(event, context):
+              cloudfront = boto3.client('cloudfront')
+              codepipeline = boto3.client('codepipeline')
+              
+              distribution_id = os.environ['DISTRIBUTION_ID']
+              job_id = event['CodePipeline.job']['id']
+              
+              try:
+                  # Create invalidation for all assets
+                  invalidation_paths = [
+                      '/js/*',
+                      '/css/*',
+                      '/images/*',
+                      '/fonts/*',
+                      '/manifest.json'
+                  ]
+                  
+                  response = cloudfront.create_invalidation(
+                      DistributionId=distribution_id,
+                      InvalidationBatch={
+                          'Paths': {
+                              'Quantity': len(invalidation_paths),
+                              'Items': invalidation_paths
+                          },
+                          'CallerReference': f"pipeline-{job_id}"
+                      }
+                  )
+                  
+                  print(f"Created invalidation: {response['Invalidation']['Id']}")
+                  
+                  # Signal success to CodePipeline
+                  codepipeline.put_job_success_result(jobId=job_id)
+                  
+              except Exception as e:
+                  print(f"Error creating invalidation: {str(e)}")
+                  codepipeline.put_job_failure_result(
+                      jobId=job_id,
+                      failureDetails={'message': str(e)}
+                  )
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Invalidation completed')
+              }
+
+  # S3 Bucket for Pipeline Artifacts
+  PipelineArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'rbi-compliance-pipeline-artifacts-${Environment}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteOldArtifacts
+          Status: Enabled
+          ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # GitHub Webhook for Pipeline Trigger
+  GitHubWebhook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Name: !Sub 'rbi-compliance-github-webhook-${Environment}'
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: !Ref GitHubWebhookSecret
+      Filters:
+      - JsonPath: "$.ref"
+        MatchEquals: !Sub 'refs/heads/${GitHubBranch}'
+      TargetPipeline: !Ref AssetDeploymentPipeline
+      TargetAction: SourceAction
+      TargetPipelineVersion: !GetAtt AssetDeploymentPipeline.Version
+      RegisterWithThirdParty: true
+
+  # IAM Roles and Policies
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'rbi-compliance-codebuild-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CodeBuildPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:ListBucket
+            Resource:
+            - !Sub '${PipelineArtifactsBucket}/*'
+            - !Sub '${PipelineArtifactsBucket}'
+            - !Sub 'arn:aws:s3:::${S3BucketName}-${Environment}/*'
+            - !Sub 'arn:aws:s3:::${S3BucketName}-${Environment}'
+          - Effect: Allow
+            Action:
+            - cloudfront:CreateInvalidation
+            - cloudfront:GetInvalidation
+            - cloudfront:ListInvalidations
+            Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'rbi-compliance-codepipeline-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: codepipeline.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CodePipelinePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:GetBucketVersioning
+            Resource:
+            - !Sub '${PipelineArtifactsBucket}/*'
+            - !Sub '${PipelineArtifactsBucket}'
+            - !Sub 'arn:aws:s3:::${S3BucketName}-${Environment}/*'
+            - !Sub 'arn:aws:s3:::${S3BucketName}-${Environment}'
+          - Effect: Allow
+            Action:
+            - codebuild:BatchGetBuilds
+            - codebuild:StartBuild
+            Resource: !GetAtt AssetOptimizationProject.Arn
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            Resource: !GetAtt CloudFrontInvalidationFunction.Arn
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'rbi-compliance-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: CloudFrontInvalidationPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - cloudfront:CreateInvalidation
+            - cloudfront:GetInvalidation
+            - cloudfront:ListInvalidations
+            Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}'
+          - Effect: Allow
+            Action:
+            - codepipeline:PutJobSuccessResult
+            - codepipeline:PutJobFailureResult
+            Resource: '*'
+
+  # CloudWatch Alarms for Pipeline Monitoring
+  PipelineFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'rbi-compliance-pipeline-failure-${Environment}'
+      AlarmDescription: 'Asset deployment pipeline failure'
+      MetricName: PipelineExecutionFailure
+      Namespace: AWS/CodePipeline
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+      - Name: PipelineName
+        Value: !Ref AssetDeploymentPipeline
+      AlarmActions:
+      - !Ref SNSTopicArn
+
+# Parameters for secrets
+Parameters:
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: GitHub personal access token
+  
+  GitHubWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: GitHub webhook secret
+  
+  SNSTopicArn:
+    Type: String
+    Description: SNS topic ARN for notifications
+
+Outputs:
+  PipelineName:
+    Description: 'Asset deployment pipeline name'
+    Value: !Ref AssetDeploymentPipeline
+    Export:
+      Name: !Sub '${AWS::StackName}-PipelineName'
+
+  CodeBuildProjectName:
+    Description: 'Asset optimization CodeBuild project name'
+    Value: !Ref AssetOptimizationProject
+    Export:
+      Name: !Sub '${AWS::StackName}-CodeBuildProjectName'
+
+  PipelineArtifactsBucket:
+    Description: 'Pipeline artifacts S3 bucket'
+    Value: !Ref PipelineArtifactsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-PipelineArtifactsBucket'

@@ -1,0 +1,473 @@
+# Intelligent Ingress Configurations
+# Advanced load balancing with traffic routing strategies
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rbi-compliance-main-ingress
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: load-balancing
+  annotations:
+    # Load balancing strategy
+    nginx.ingress.kubernetes.io/load-balance: "ewma"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$request_uri"
+    
+    # Session affinity for stateful operations
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-name: "rbi-compliance-session"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
+    nginx.ingress.kubernetes.io/session-cookie-change-on-failure: "true"
+    
+    # Rate limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "20"
+    
+    # SSL/TLS configuration
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    
+    # Performance optimizations
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    
+    # Health checks
+    nginx.ingress.kubernetes.io/upstream-max-fails: "3"
+    nginx.ingress.kubernetes.io/upstream-fail-timeout: "10s"
+    
+    # Compression
+    nginx.ingress.kubernetes.io/enable-brotli: "true"
+    nginx.ingress.kubernetes.io/brotli-level: "6"
+    
+    # Security
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://rbi-compliance.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    
+    # Custom error pages
+    nginx.ingress.kubernetes.io/custom-http-errors: "404,503,502,500"
+    nginx.ingress.kubernetes.io/default-backend: "rbi-compliance/error-page-service"
+    
+    # Monitoring
+    nginx.ingress.kubernetes.io/enable-opentracing: "true"
+    
+    # Certificate management
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.rbi-compliance.com
+    - app.rbi-compliance.com
+    - admin.rbi-compliance.com
+    secretName: rbi-compliance-tls
+  
+  rules:
+  # API Gateway routing
+  - host: api.rbi-compliance.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8080
+
+  # Frontend application routing
+  - host: app.rbi-compliance.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-app
+            port:
+              number: 3000
+
+  # Admin interface routing
+  - host: admin.rbi-compliance.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: admin-interface
+            port:
+              number: 3001
+
+---
+# API-specific Ingress with advanced routing
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rbi-compliance-api-ingress
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: api-load-balancing
+  annotations:
+    # Weighted routing for canary deployments
+    nginx.ingress.kubernetes.io/canary: "false"
+    nginx.ingress.kubernetes.io/canary-weight: "0"
+    
+    # Service-specific load balancing
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"
+    
+    # API-specific rate limiting
+    nginx.ingress.kubernetes.io/rate-limit: "200"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    
+    # Request routing based on headers
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location /api/auth {
+        proxy_pass http://upstream_balancer;
+        proxy_set_header X-Service-Route "auth";
+      }
+      
+      location /api/compliance {
+        proxy_pass http://upstream_balancer;
+        proxy_set_header X-Service-Route "compliance";
+      }
+      
+      location /api/integration {
+        proxy_pass http://upstream_balancer;
+        proxy_set_header X-Service-Route "integration";
+      }
+    
+    # Circuit breaker configuration
+    nginx.ingress.kubernetes.io/upstream-max-fails: "5"
+    nginx.ingress.kubernetes.io/upstream-fail-timeout: "30s"
+    
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.rbi-compliance.com
+    secretName: rbi-compliance-api-tls
+  
+  rules:
+  - host: api.rbi-compliance.com
+    http:
+      paths:
+      # Authentication service routing
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-service
+            port:
+              number: 8080
+      
+      # Compliance service routing
+      - path: /api/compliance
+        pathType: Prefix
+        backend:
+          service:
+            name: compliance-service
+            port:
+              number: 8080
+      
+      # Integration gateway routing
+      - path: /api/integration
+        pathType: Prefix
+        backend:
+          service:
+            name: integration-gateway
+            port:
+              number: 8080
+      
+      # Document service routing
+      - path: /api/documents
+        pathType: Prefix
+        backend:
+          service:
+            name: document-service
+            port:
+              number: 8080
+      
+      # Workflow service routing
+      - path: /api/workflows
+        pathType: Prefix
+        backend:
+          service:
+            name: workflow-service
+            port:
+              number: 8080
+
+---
+# Canary deployment Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rbi-compliance-canary-ingress
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: canary-load-balancing
+  annotations:
+    # Canary deployment configuration
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "10"
+    nginx.ingress.kubernetes.io/canary-by-header: "X-Canary"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "always"
+    nginx.ingress.kubernetes.io/canary-by-cookie: "canary"
+    
+    # Load balancing for canary
+    nginx.ingress.kubernetes.io/load-balance: "least_conn"
+    
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.rbi-compliance.com
+    secretName: rbi-compliance-api-tls
+  
+  rules:
+  - host: api.rbi-compliance.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway-canary
+            port:
+              number: 8080
+
+---
+# Geographic routing Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rbi-compliance-geo-ingress
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: geo-load-balancing
+  annotations:
+    # Geographic routing based on client location
+    nginx.ingress.kubernetes.io/server-snippet: |
+      set $backend_pool "default";
+      
+      # Route based on client IP geolocation
+      if ($geoip_country_code = "IN") {
+        set $backend_pool "india";
+      }
+      if ($geoip_country_code = "US") {
+        set $backend_pool "us";
+      }
+      if ($geoip_country_code = "SG") {
+        set $backend_pool "singapore";
+      }
+      
+      # Set upstream based on geographic location
+      proxy_pass http://upstream_$backend_pool;
+    
+    # Load balancing strategy for geo-routing
+    nginx.ingress.kubernetes.io/load-balance: "ip_hash"
+    
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - global.rbi-compliance.com
+    secretName: rbi-compliance-global-tls
+  
+  rules:
+  - host: global.rbi-compliance.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8080
+
+---
+# Error page service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-page-service
+  namespace: rbi-compliance
+  labels:
+    app: error-page-service
+    component: load-balancing
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: error-page-service
+  template:
+    metadata:
+      labels:
+        app: error-page-service
+    spec:
+      containers:
+      - name: error-page
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: error-pages
+          mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: error-pages
+        configMap:
+          name: error-pages-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-page-service
+  namespace: rbi-compliance
+  labels:
+    app: error-page-service
+    component: load-balancing
+spec:
+  selector:
+    app: error-page-service
+  ports:
+  - port: 80
+    targetPort: 80
+
+---
+# Error pages configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: error-pages-config
+  namespace: rbi-compliance
+  labels:
+    app: error-page-service
+    component: load-balancing
+data:
+  404.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RBI Compliance - Page Not Found</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error-container { max-width: 600px; margin: 0 auto; }
+            .error-code { font-size: 72px; color: #e74c3c; margin-bottom: 20px; }
+            .error-message { font-size: 24px; color: #2c3e50; margin-bottom: 30px; }
+            .error-description { font-size: 16px; color: #7f8c8d; margin-bottom: 40px; }
+            .back-button { background-color: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <div class="error-code">404</div>
+            <div class="error-message">Page Not Found</div>
+            <div class="error-description">
+                The requested page could not be found on the RBI Compliance Platform.
+            </div>
+            <a href="/" class="back-button">Return to Home</a>
+        </div>
+    </body>
+    </html>
+  
+  500.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RBI Compliance - Internal Server Error</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error-container { max-width: 600px; margin: 0 auto; }
+            .error-code { font-size: 72px; color: #e74c3c; margin-bottom: 20px; }
+            .error-message { font-size: 24px; color: #2c3e50; margin-bottom: 30px; }
+            .error-description { font-size: 16px; color: #7f8c8d; margin-bottom: 40px; }
+            .back-button { background-color: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <div class="error-code">500</div>
+            <div class="error-message">Internal Server Error</div>
+            <div class="error-description">
+                We're experiencing technical difficulties. Please try again later.
+            </div>
+            <a href="/" class="back-button">Return to Home</a>
+        </div>
+    </body>
+    </html>
+  
+  502.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RBI Compliance - Service Unavailable</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error-container { max-width: 600px; margin: 0 auto; }
+            .error-code { font-size: 72px; color: #e74c3c; margin-bottom: 20px; }
+            .error-message { font-size: 24px; color: #2c3e50; margin-bottom: 30px; }
+            .error-description { font-size: 16px; color: #7f8c8d; margin-bottom: 40px; }
+            .back-button { background-color: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <div class="error-code">502</div>
+            <div class="error-message">Service Unavailable</div>
+            <div class="error-description">
+                The service is temporarily unavailable. We're working to restore it.
+            </div>
+            <a href="/" class="back-button">Return to Home</a>
+        </div>
+    </body>
+    </html>
+  
+  503.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RBI Compliance - Maintenance Mode</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error-container { max-width: 600px; margin: 0 auto; }
+            .error-code { font-size: 72px; color: #f39c12; margin-bottom: 20px; }
+            .error-message { font-size: 24px; color: #2c3e50; margin-bottom: 30px; }
+            .error-description { font-size: 16px; color: #7f8c8d; margin-bottom: 40px; }
+            .back-button { background-color: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <div class="error-code">503</div>
+            <div class="error-message">Maintenance Mode</div>
+            <div class="error-description">
+                The RBI Compliance Platform is currently under maintenance. Please check back soon.
+            </div>
+            <a href="/" class="back-button">Return to Home</a>
+        </div>
+    </body>
+    </html>

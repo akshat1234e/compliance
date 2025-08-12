@@ -1,0 +1,253 @@
+# Horizontal Pod Autoscaler for Authentication Service
+# Scales based on CPU, memory, and custom metrics
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-service-hpa
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: autoscaling
+    environment: production
+  annotations:
+    description: "HPA for authentication service with multi-metric scaling"
+    contact: "devops@rbi-compliance.com"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service
+  
+  # Scaling configuration
+  minReplicas: 3
+  maxReplicas: 20
+  
+  # Scaling behavior configuration
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5 minutes
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60   # 1 minute
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 4
+        periodSeconds: 30
+      selectPolicy: Max
+  
+  # Metrics for scaling decisions
+  metrics:
+  # CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  
+  # Memory utilization
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  
+  # Custom metric: Request rate per second
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  
+  # Custom metric: Response time
+  - type: Pods
+    pods:
+      metric:
+        name: http_request_duration_seconds
+      target:
+        type: AverageValue
+        averageValue: "200m"  # 200ms
+  
+  # External metric: Queue depth
+  - type: External
+    external:
+      metric:
+        name: redis_queue_depth
+        selector:
+          matchLabels:
+            queue: auth-requests
+      target:
+        type: AverageValue
+        averageValue: "50"
+
+---
+# ServiceMonitor for Prometheus metrics collection
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: auth-service-metrics
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+    honorLabels: true
+
+---
+# PrometheusRule for custom metrics and alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: auth-service-scaling-rules
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: monitoring
+spec:
+  groups:
+  - name: auth-service.scaling
+    interval: 15s
+    rules:
+    # Request rate metric for HPA
+    - record: http_requests_per_second
+      expr: |
+        rate(http_requests_total{job="auth-service"}[1m])
+    
+    # Average response time metric for HPA
+    - record: http_request_duration_seconds
+      expr: |
+        histogram_quantile(0.95, 
+          rate(http_request_duration_seconds_bucket{job="auth-service"}[1m])
+        )
+    
+    # Queue depth metric for HPA
+    - record: redis_queue_depth
+      expr: |
+        redis_list_length{queue="auth-requests"}
+    
+    # Scaling alerts
+    - alert: AuthServiceHighLoad
+      expr: |
+        http_requests_per_second{job="auth-service"} > 150
+      for: 2m
+      labels:
+        severity: warning
+        service: auth-service
+      annotations:
+        summary: "Auth service experiencing high load"
+        description: "Auth service request rate is {{ $value }} req/s, above threshold"
+    
+    - alert: AuthServiceSlowResponse
+      expr: |
+        http_request_duration_seconds{job="auth-service"} > 0.5
+      for: 1m
+      labels:
+        severity: warning
+        service: auth-service
+      annotations:
+        summary: "Auth service response time degraded"
+        description: "Auth service 95th percentile response time is {{ $value }}s"
+    
+    - alert: AuthServiceScalingIssue
+      expr: |
+        kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler="auth-service-hpa"} 
+        >= 
+        kube_horizontalpodautoscaler_spec_max_replicas{horizontalpodautoscaler="auth-service-hpa"}
+      for: 5m
+      labels:
+        severity: critical
+        service: auth-service
+      annotations:
+        summary: "Auth service at maximum scale"
+        description: "Auth service HPA has reached maximum replicas, consider increasing limits"
+
+---
+# PodDisruptionBudget to ensure availability during scaling
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service-pdb
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: availability
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: auth-service
+
+---
+# NetworkPolicy for scaled pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-service-network-policy
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: auth-service
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: rbi-compliance
+    - podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090  # metrics port
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: rbi-compliance
+    - podSelector:
+        matchLabels:
+          app: database
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: rbi-compliance
+    - podSelector:
+        matchLabels:
+          app: redis
+  - to: []  # Allow external DNS/NTP
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 123

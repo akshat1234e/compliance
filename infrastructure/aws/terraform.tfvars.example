@@ -1,0 +1,131 @@
+# RBI Compliance Platform - AWS Infrastructure Variables
+# Copy this file to terraform.tfvars and update the values
+
+# Environment Configuration
+environment = "prod"  # Options: dev, staging, prod
+aws_region = "ap-south-1"  # Mumbai region for India compliance
+
+# Project Configuration
+project_name = "rbi-compliance"
+
+# VPC Configuration
+vpc_cidr = "10.0.0.0/16"
+
+# EKS Configuration
+kubernetes_version = "1.28"
+node_instance_types = ["t3.large", "t3.xlarge"]
+spot_instance_types = ["t3.large", "t3.xlarge", "m5.large", "m5.xlarge"]
+
+# Node Group Configuration (will be overridden by environment_configs)
+node_group_min_size = 3
+node_group_max_size = 15
+node_group_desired_size = 5
+
+# Database Configuration
+rds_instance_class = "db.r5.xlarge"
+rds_allocated_storage = 100
+rds_max_allocated_storage = 1000
+database_name = "rbi_compliance"
+database_username = "rbi_user"
+database_password = "CHANGE_ME_TO_SECURE_PASSWORD"  # Use a strong password
+
+# Redis Configuration
+redis_node_type = "cache.r5.large"
+redis_auth_token = "CHANGE_ME_TO_SECURE_TOKEN"  # Use a strong auth token
+
+# S3 Configuration
+s3_bucket_prefix = "rbi-compliance"
+
+# Security Configuration
+enable_vpc_flow_logs = true
+enable_guardduty = true
+enable_config = true
+
+# Domain Configuration
+domain_name = "rbi-compliance.com"
+alternative_domain_names = ["*.rbi-compliance.com", "api.rbi-compliance.com"]
+
+# Route53 Configuration
+create_route53_zone = true
+
+# WAF Configuration
+enable_waf = true
+
+# Monitoring Configuration
+log_retention_days = 30
+enable_detailed_monitoring = true
+
+# Backup Configuration
+backup_retention_days = 30
+enable_cross_region_backup = true
+backup_region = "ap-southeast-1"
+
+# Cost Optimization
+enable_spot_instances = true
+enable_cluster_autoscaler = true
+
+# Compliance and Governance
+enable_cloudtrail = true
+enable_secrets_manager = true
+
+# Load Balancer Configuration
+enable_deletion_protection = true
+
+# AWS Auth Users (Add your AWS users here)
+aws_auth_users = [
+  # {
+  #   userarn  = "arn:aws:iam::123456789012:user/admin"
+  #   username = "admin"
+  #   groups   = ["system:masters"]
+  # }
+]
+
+# Additional Tags
+additional_tags = {
+  "CostCenter" = "IT-Infrastructure"
+  "Owner" = "DevOps-Team"
+  "Compliance" = "RBI"
+  "DataClassification" = "Confidential"
+}
+
+# Environment-specific configurations are defined in variables.tf
+# The following will be automatically applied based on the environment:
+#
+# Development (dev):
+# - Smaller instance sizes
+# - Single AZ deployment
+# - Basic backup retention (7 days)
+# - Cost-optimized settings
+#
+# Staging (staging):
+# - Medium instance sizes
+# - Multi-AZ deployment
+# - Medium backup retention (14 days)
+# - Production-like settings for testing
+#
+# Production (prod):
+# - Large instance sizes
+# - Multi-AZ with high availability
+# - Extended backup retention (30 days)
+# - Full security and compliance features
+
+# Security Notes:
+# 1. Change all default passwords and tokens
+# 2. Use AWS Secrets Manager for sensitive data in production
+# 3. Enable MFA for all AWS users
+# 4. Regularly rotate credentials
+# 5. Monitor CloudTrail logs for suspicious activity
+
+# Cost Optimization Notes:
+# 1. Use spot instances for non-critical workloads
+# 2. Enable auto-scaling to optimize costs
+# 3. Set up billing alerts
+# 4. Use Reserved Instances for predictable workloads
+# 5. Implement S3 lifecycle policies
+
+# Compliance Notes:
+# 1. Enable all security features for production
+# 2. Configure proper backup and retention policies
+# 3. Ensure data residency requirements are met
+# 4. Enable comprehensive logging and monitoring
+# 5. Regular security assessments and updates

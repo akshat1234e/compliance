@@ -1,0 +1,468 @@
+# Advanced Service Configurations
+# Multiple load balancing strategies and service discovery
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: load-balancing
+  annotations:
+    # Load balancing strategy
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+    
+    # Health check configuration
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "3"
+    
+    # Connection settings
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
+    
+    # Cross-zone load balancing
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    
+    # Session affinity
+    service.alpha.kubernetes.io/session-affinity: "ClientIP"
+    service.alpha.kubernetes.io/session-affinity-timeout: "3600"
+    
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: auth-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: compliance-service
+  namespace: rbi-compliance
+  labels:
+    app: compliance-service
+    component: load-balancing
+  annotations:
+    # Round-robin load balancing (default)
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "false"
+    
+    # Health check configuration for compliance workloads
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "3"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "2"
+    
+    # No session affinity for stateless compliance operations
+    service.alpha.kubernetes.io/session-affinity: "None"
+    
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: grpc
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  selector:
+    app: compliance-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: integration-gateway
+  namespace: rbi-compliance
+  labels:
+    app: integration-gateway
+    component: load-balancing
+  annotations:
+    # Least connections load balancing for integration workloads
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+    
+    # Aggressive health checks for external integrations
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "3"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "2"
+    
+    # Connection settings optimized for external APIs
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "30"
+    
+    # No session affinity for integration gateway
+    service.alpha.kubernetes.io/session-affinity: "None"
+    
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 8443
+    targetPort: 8443
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: integration-gateway
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: rbi-compliance
+  labels:
+    app: api-gateway
+    component: load-balancing
+  annotations:
+    # IP hash load balancing for consistent routing
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+    
+    # Fast health checks for API gateway
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "2"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "2"
+    
+    # Connection settings for high throughput
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "15"
+    
+    # Session affinity for API consistency
+    service.alpha.kubernetes.io/session-affinity: "ClientIP"
+    service.alpha.kubernetes.io/session-affinity-timeout: "1800"
+    
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 1800
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 8443
+    targetPort: 8443
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: admin
+    port: 8082
+    targetPort: 8082
+    protocol: TCP
+  selector:
+    app: api-gateway
+
+---
+# Headless service for service discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service-headless
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: service-discovery
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: auth-service
+
+---
+# External service for load balancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: rbi-compliance-external-lb
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: external-load-balancer
+  annotations:
+    # AWS Network Load Balancer
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+    
+    # Cross-zone load balancing
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    
+    # Health check configuration
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8081"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "2"
+    
+    # Connection draining
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-draining-timeout: "60"
+    
+    # SSL termination
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:ap-south-1:ACCOUNT_ID:certificate/CERT_ID"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-negotiation-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
+    
+    # Access logs
+    service.beta.kubernetes.io/aws-load-balancer-access-log-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-access-log-s3-bucket-name: "rbi-compliance-lb-logs"
+    service.beta.kubernetes.io/aws-load-balancer-access-log-s3-bucket-prefix: "nlb"
+    
+    # Additional attributes
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "Environment=production,Project=rbi-compliance"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: api-gateway
+
+---
+# Service for canary deployments
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-canary
+  namespace: rbi-compliance
+  labels:
+    app: api-gateway
+    version: canary
+    component: canary-load-balancing
+  annotations:
+    # Canary-specific load balancing
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+    
+    # Conservative health checks for canary
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "15"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "3"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "2"
+    
+    # Prometheus monitoring
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: api-gateway
+    version: canary
+
+---
+# EndpointSlice for advanced load balancing
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: auth-service-endpoints
+  namespace: rbi-compliance
+  labels:
+    kubernetes.io/service-name: auth-service
+    app: auth-service
+    component: load-balancing
+addressType: IPv4
+ports:
+- name: http
+  port: 8080
+  protocol: TCP
+- name: metrics
+  port: 9090
+  protocol: TCP
+endpoints:
+- addresses:
+  - "10.0.1.10"
+  - "10.0.1.11"
+  - "10.0.1.12"
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+  zone: "ap-south-1a"
+  hints:
+    forZones:
+    - name: "ap-south-1a"
+- addresses:
+  - "10.0.2.10"
+  - "10.0.2.11"
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+  zone: "ap-south-1b"
+  hints:
+    forZones:
+    - name: "ap-south-1b"
+
+---
+# Service Monitor for load balancing metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: load-balancing-metrics
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-monitoring
+spec:
+  selector:
+    matchLabels:
+      component: load-balancing
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+  - port: health
+    interval: 10s
+    path: /health
+    honorLabels: true
+
+---
+# Network Policy for load balancing security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: load-balancing-network-policy
+  namespace: rbi-compliance
+  labels:
+    component: load-balancing-security
+spec:
+  podSelector:
+    matchLabels:
+      component: load-balancing
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - podSelector:
+        matchLabels:
+          app: api-gateway
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8443
+    - protocol: TCP
+      port: 9090
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: rbi-compliance
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9000
+  - to: []  # Allow external DNS/NTP
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 123

@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbi-compliance
+  labels:
+    name: rbi-compliance
+    environment: production
+    project: rbi-compliance-platform
+    managed-by: kubernetes
+  annotations:
+    description: "RBI Compliance Platform - Production Environment"
+    contact: "devops@rbi-compliance.com"
+    version: "1.0.0"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbi-compliance-staging
+  labels:
+    name: rbi-compliance-staging
+    environment: staging
+    project: rbi-compliance-platform
+    managed-by: kubernetes
+  annotations:
+    description: "RBI Compliance Platform - Staging Environment"
+    contact: "devops@rbi-compliance.com"
+    version: "1.0.0"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbi-compliance-dev
+  labels:
+    name: rbi-compliance-dev
+    environment: development
+    project: rbi-compliance-platform
+    managed-by: kubernetes
+  annotations:
+    description: "RBI Compliance Platform - Development Environment"
+    contact: "devops@rbi-compliance.com"
+    version: "1.0.0"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbi-compliance-monitoring
+  labels:
+    name: rbi-compliance-monitoring
+    environment: production
+    project: rbi-compliance-platform
+    component: monitoring
+    managed-by: kubernetes
+  annotations:
+    description: "RBI Compliance Platform - Monitoring and Observability"
+    contact: "devops@rbi-compliance.com"
+    version: "1.0.0"

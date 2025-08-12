@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RBI Compliance Platform - Documentation</title>
+    <meta name="description" content="Comprehensive documentation for the RBI Compliance Platform - Banking integration, regulatory management, and compliance automation.">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    
+    <!-- CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .doc-sidebar {
+            height: calc(100vh - 4rem);
+            overflow-y: auto;
+        }
+        .search-highlight {
+            background-color: #fef3c7;
+            padding: 0.125rem 0.25rem;
+            border-radius: 0.25rem;
+        }
+        .version-badge {
+            background: #10b981;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo and Title -->
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <img class="h-8 w-8" src="/logo.svg" alt="RBI Compliance Platform">
+                    </div>
+                    <div class="ml-3">
+                        <h1 class="text-xl font-semibold text-gray-900">RBI Compliance Platform</h1>
+                        <p class="text-sm text-gray-500">Documentation</p>
+                    </div>
+                </div>
+                
+                <!-- Navigation -->
+                <nav class="hidden md:flex space-x-8">
+                    <a href="#" class="text-gray-900 hover:text-indigo-600 px-3 py-2 text-sm font-medium">Documentation</a>
+                    <a href="#api" class="text-gray-500 hover:text-indigo-600 px-3 py-2 text-sm font-medium">API Reference</a>
+                    <a href="#tutorials" class="text-gray-500 hover:text-indigo-600 px-3 py-2 text-sm font-medium">Tutorials</a>
+                    <a href="#support" class="text-gray-500 hover:text-indigo-600 px-3 py-2 text-sm font-medium">Support</a>
+                </nav>
+                
+                <!-- Version and Search -->
+                <div class="flex items-center space-x-4">
+                    <span class="version-badge">v1.0.0</span>
+                    <div class="relative">
+                        <input type="text" id="search-input" placeholder="Search documentation..." 
+                               class="w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-gray-400"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="flex">
+            <!-- Sidebar -->
+            <aside class="w-64 flex-shrink-0 mr-8">
+                <div class="doc-sidebar bg-white rounded-lg shadow-sm border p-6">
+                    <nav class="space-y-1">
+                        <!-- Getting Started -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Getting Started</h3>
+                            <ul class="mt-2 space-y-1">
+                                <li><a href="#overview" class="text-indigo-600 hover:text-indigo-800 block py-1 text-sm">Overview</a></li>
+                                <li><a href="#installation" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Installation</a></li>
+                                <li><a href="#quick-start" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Quick Start</a></li>
+                                <li><a href="#authentication" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Authentication</a></li>
+                            </ul>
+                        </div>
+                        
+                        <!-- User Guide -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">User Guide</h3>
+                            <ul class="mt-2 space-y-1">
+                                <li><a href="#dashboard" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Dashboard</a></li>
+                                <li><a href="#connectors" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Banking Connectors</a></li>
+                                <li><a href="#monitoring" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">System Monitoring</a></li>
+                                <li><a href="#compliance" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Compliance Management</a></li>
+                                <li><a href="#regulatory" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Regulatory Management</a></li>
+                                <li><a href="#webhooks" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Webhook Management</a></li>
+                            </ul>
+                        </div>
+                        
+                        <!-- API Reference -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">API Reference</h3>
+                            <ul class="mt-2 space-y-1">
+                                <li><a href="#api-overview" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">API Overview</a></li>
+                                <li><a href="#api-auth" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Authentication API</a></li>
+                                <li><a href="#api-gateway" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Gateway API</a></li>
+                                <li><a href="#api-monitoring" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Monitoring API</a></li>
+                                <li><a href="#api-compliance" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Compliance API</a></li>
+                                <li><a href="#api-regulatory" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Regulatory API</a></li>
+                            </ul>
+                        </div>
+                        
+                        <!-- Tutorials -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Tutorials</h3>
+                            <ul class="mt-2 space-y-1">
+                                <li><a href="#tutorial-setup" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Platform Setup</a></li>
+                                <li><a href="#tutorial-workflows" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Creating Workflows</a></li>
+                                <li><a href="#tutorial-integration" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Banking Integration</a></li>
+                                <li><a href="#tutorial-reporting" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Custom Reporting</a></li>
+                            </ul>
+                        </div>
+                        
+                        <!-- Resources -->
+                        <div class="pb-4">
+                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Resources</h3>
+                            <ul class="mt-2 space-y-1">
+                                <li><a href="#deployment" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Deployment Guide</a></li>
+                                <li><a href="#troubleshooting" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Troubleshooting</a></li>
+                                <li><a href="#faq" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">FAQ</a></li>
+                                <li><a href="#changelog" class="text-gray-600 hover:text-indigo-600 block py-1 text-sm">Changelog</a></li>
+                            </ul>
+                        </div>
+                    </nav>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="flex-1">
+                <!-- Hero Section -->
+                <div class="gradient-bg rounded-lg p-8 mb-8 text-white">
+                    <h1 class="text-4xl font-bold mb-4">RBI Compliance Platform Documentation</h1>
+                    <p class="text-xl mb-6">Comprehensive guide to banking integration, regulatory management, and compliance automation for Indian financial institutions.</p>
+                    <div class="flex space-x-4">
+                        <a href="#quick-start" class="bg-white text-indigo-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
+                            Get Started
+                        </a>
+                        <a href="#api" class="border border-white text-white px-6 py-3 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-colors">
+                            API Reference
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Quick Links -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-rocket text-indigo-600 text-2xl mr-3"></i>
+                            <h3 class="text-lg font-semibold">Quick Start Guide</h3>
+                        </div>
+                        <p class="text-gray-600 mb-4">Get up and running with the RBI Compliance Platform in minutes.</p>
+                        <a href="#quick-start" class="text-indigo-600 hover:text-indigo-800 font-medium">
+                            Start Tutorial <i class="fas fa-arrow-right ml-1"></i>
+                        </a>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-code text-green-600 text-2xl mr-3"></i>
+                            <h3 class="text-lg font-semibold">API Documentation</h3>
+                        </div>
+                        <p class="text-gray-600 mb-4">Complete API reference with examples and interactive testing.</p>
+                        <a href="#api" class="text-indigo-600 hover:text-indigo-800 font-medium">
+                            Explore APIs <i class="fas fa-arrow-right ml-1"></i>
+                        </a>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-sm border p-6 hover:shadow-md transition-shadow">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-graduation-cap text-purple-600 text-2xl mr-3"></i>
+                            <h3 class="text-lg font-semibold">Training Materials</h3>
+                        </div>
+                        <p class="text-gray-600 mb-4">Video tutorials, interactive demos, and certification programs.</p>
+                        <a href="#tutorials" class="text-indigo-600 hover:text-indigo-800 font-medium">
+                            Start Learning <i class="fas fa-arrow-right ml-1"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Featured Content -->
+                <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                    <h2 class="text-2xl font-bold mb-6">Platform Overview</h2>
+                    
+                    <div class="prose max-w-none">
+                        <p class="text-lg text-gray-600 mb-6">
+                            The RBI Compliance Platform is a comprehensive solution designed for Indian banks, NBFCs, and financial institutions 
+                            to automate compliance management, integrate with core banking systems, and ensure regulatory adherence.
+                        </p>
+
+                        <h3 class="text-xl font-semibold mb-4">Key Features</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div class="flex items-start">
+                                <i class="fas fa-link text-blue-600 text-xl mr-3 mt-1"></i>
+                                <div>
+                                    <h4 class="font-semibold mb-2">Banking System Integration</h4>
+                                    <p class="text-gray-600">Connect with Temenos T24, Finacle, Flexcube, and other core banking systems.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <i class="fas fa-shield-alt text-green-600 text-xl mr-3 mt-1"></i>
+                                <div>
+                                    <h4 class="font-semibold mb-2">Regulatory Compliance</h4>
+                                    <p class="text-gray-600">Automated RBI circular tracking, compliance monitoring, and regulatory reporting.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <i class="fas fa-chart-line text-purple-600 text-xl mr-3 mt-1"></i>
+                                <div>
+                                    <h4 class="font-semibold mb-2">Real-time Monitoring</h4>
+                                    <p class="text-gray-600">System health monitoring, performance analytics, and intelligent alerting.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start">
+                                <i class="fas fa-cogs text-orange-600 text-xl mr-3 mt-1"></i>
+                                <div>
+                                    <h4 class="font-semibold mb-2">Workflow Automation</h4>
+                                    <p class="text-gray-600">Configurable compliance workflows, task management, and approval processes.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h3 class="text-xl font-semibold mb-4">Architecture</h3>
+                        <p class="text-gray-600 mb-4">
+                            Built on a modern microservices architecture with event-driven communication, the platform ensures 
+                            scalability, reliability, and security for enterprise banking environments.
+                        </p>
+
+                        <div class="bg-gray-50 rounded-lg p-6 mb-6">
+                            <h4 class="font-semibold mb-3">Core Components</h4>
+                            <ul class="space-y-2">
+                                <li class="flex items-center">
+                                    <i class="fas fa-server text-gray-600 mr-2"></i>
+                                    <span><strong>Integration Gateway:</strong> Central hub for banking system connections</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-lock text-gray-600 mr-2"></i>
+                                    <span><strong>Auth Service:</strong> JWT-based authentication and RBAC</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-file-alt text-gray-600 mr-2"></i>
+                                    <span><strong>Document Service:</strong> Secure document management with OCR</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-tasks text-gray-600 mr-2"></i>
+                                    <span><strong>Workflow Service:</strong> Business process automation</span>
+                                </li>
+                                <li class="flex items-center">
+                                    <i class="fas fa-balance-scale text-gray-600 mr-2"></i>
+                                    <span><strong>Compliance Service:</strong> Regulatory compliance management</span>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="flex space-x-4">
+                            <a href="#installation" class="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors">
+                                Installation Guide
+                            </a>
+                            <a href="#api" class="border border-indigo-600 text-indigo-600 px-6 py-3 rounded-lg font-semibold hover:bg-indigo-50 transition-colors">
+                                API Reference
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Results (Hidden by default) -->
+                <div id="search-results" class="hidden bg-white rounded-lg shadow-sm border p-8">
+                    <h2 class="text-2xl font-bold mb-6">Search Results</h2>
+                    <div id="search-results-content">
+                        <!-- Search results will be populated here -->
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white mt-16">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Documentation</h3>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-300 hover:text-white">User Guide</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">API Reference</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Tutorials</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Examples</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Resources</h3>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-300 hover:text-white">Deployment Guide</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Best Practices</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Troubleshooting</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">FAQ</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Community</h3>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-300 hover:text-white">GitHub</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Stack Overflow</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Discord</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Twitter</a></li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Support</h3>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-300 hover:text-white">Contact Support</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Status Page</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Release Notes</a></li>
+                        <li><a href="#" class="text-gray-300 hover:text-white">Security</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="border-t border-gray-700 mt-8 pt-8 text-center">
+                <p class="text-gray-300">© 2024 RBI Compliance Platform. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/plugins/autoloader/prism-autoloader.min.js"></script>
+    
+    <script>
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        const searchResults = document.getElementById('search-results');
+        const searchResultsContent = document.getElementById('search-results-content');
+        
+        // Mock search data
+        const searchData = [
+            { title: 'Getting Started', content: 'Quick start guide for the RBI Compliance Platform', url: '#quick-start' },
+            { title: 'API Authentication', content: 'How to authenticate with the platform APIs', url: '#api-auth' },
+            { title: 'Banking Connectors', content: 'Configure connections to banking systems', url: '#connectors' },
+            { title: 'Compliance Workflows', content: 'Create and manage compliance workflows', url: '#compliance' },
+            { title: 'Regulatory Management', content: 'Track RBI circulars and compliance status', url: '#regulatory' }
+        ];
+        
+        searchInput.addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            
+            if (query.length < 2) {
+                searchResults.classList.add('hidden');
+                return;
+            }
+            
+            const results = searchData.filter(item => 
+                item.title.toLowerCase().includes(query) || 
+                item.content.toLowerCase().includes(query)
+            );
+            
+            if (results.length > 0) {
+                searchResultsContent.innerHTML = results.map(result => `
+                    <div class="border-b border-gray-200 pb-4 mb-4 last:border-b-0">
+                        <h3 class="text-lg font-semibold mb-2">
+                            <a href="${result.url}" class="text-indigo-600 hover:text-indigo-800">${result.title}</a>
+                        </h3>
+                        <p class="text-gray-600">${result.content}</p>
+                    </div>
+                `).join('');
+                
+                searchResults.classList.remove('hidden');
+            } else {
+                searchResultsContent.innerHTML = '<p class="text-gray-500">No results found.</p>';
+                searchResults.classList.remove('hidden');
+            }
+        });
+        
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+        
+        // Active navigation highlighting
+        const navLinks = document.querySelectorAll('aside nav a');
+        
+        function updateActiveNav() {
+            const scrollPosition = window.scrollY;
+            
+            navLinks.forEach(link => {
+                const href = link.getAttribute('href');
+                if (href.startsWith('#')) {
+                    const target = document.querySelector(href);
+                    if (target) {
+                        const targetTop = target.offsetTop - 100;
+                        const targetBottom = targetTop + target.offsetHeight;
+                        
+                        if (scrollPosition >= targetTop && scrollPosition < targetBottom) {
+                            navLinks.forEach(l => l.classList.remove('text-indigo-600'));
+                            link.classList.add('text-indigo-600');
+                        }
+                    }
+                }
+            });
+        }
+        
+        window.addEventListener('scroll', updateActiveNav);
+    </script>
+</body>
+</html>
