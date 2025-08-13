@@ -3,24 +3,28 @@ const nextConfig = {
   // React configuration
   reactStrictMode: true,
   swcMinify: true,
-  
+
+  // Production optimizations
+  output: 'standalone',
+  compress: true,
+  poweredByHeader: false,
+
   // TypeScript configuration
   typescript: {
     ignoreBuildErrors: false,
   },
-  
+
   // ESLint configuration
   eslint: {
     ignoreDuringBuilds: false,
   },
-  
+
   // Experimental features
   experimental: {
-    appDir: true,
     serverComponentsExternalPackages: ['@prisma/client'],
     optimizePackageImports: ['@heroicons/react', 'lodash'],
   },
-  
+
   // Image optimization
   images: {
     domains: [
@@ -28,28 +32,67 @@ const nextConfig = {
       'rbi.org.in',
       'sebi.gov.in',
       'irdai.gov.in',
+      'cdn.rbi-compliance.com',
     ],
     formats: ['image/webp', 'image/avif'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    minimumCacheTTL: 60,
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
-  
+
+  // Security headers
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains; preload',
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.rbi-compliance.com wss://api.rbi-compliance.com;",
+          },
+        ],
+      },
+    ];
+  },
+
   // Environment variables
   env: {
     CUSTOM_KEY: process.env.CUSTOM_KEY,
   },
-  
+
   // Public runtime config
   publicRuntimeConfig: {
     APP_NAME: 'RBI Compliance Platform',
     APP_VERSION: '1.0.0',
   },
-  
+
   // Server runtime config
   serverRuntimeConfig: {
     PROJECT_ROOT: __dirname,
   },
-  
+
   // Headers configuration
   async headers() {
     return [
@@ -93,7 +136,7 @@ const nextConfig = {
       },
     ];
   },
-  
+
   // Redirects configuration
   async redirects() {
     return [
@@ -109,52 +152,46 @@ const nextConfig = {
       },
     ];
   },
-  
+
   // Rewrites configuration
   async rewrites() {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
     return [
       {
         source: '/api/regulatory/:path*',
-        destination: `${process.env.REGULATORY_SERVICE_URL}/api/v1/:path*`,
+        destination: `${API_BASE_URL}/regulatory/:path*`,
       },
       {
         source: '/api/compliance/:path*',
-        destination: `${process.env.COMPLIANCE_SERVICE_URL}/api/v1/:path*`,
+        destination: `${API_BASE_URL}/compliance/:path*`,
       },
       {
         source: '/api/documents/:path*',
-        destination: `${process.env.DOCUMENT_SERVICE_URL}/api/v1/:path*`,
+        destination: `${API_BASE_URL}/documents/:path*`,
       },
       {
         source: '/api/risk/:path*',
-        destination: `${process.env.RISK_SERVICE_URL}/api/v1/:path*`,
+        destination: `${API_BASE_URL}/risk/:path*`,
       },
       {
         source: '/api/ai/:path*',
-        destination: `${process.env.AI_SERVICE_URL}/api/v1/:path*`,
+        destination: `${API_BASE_URL}/ai/:path*`,
       },
     ];
   },
-  
+
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
-    // Bundle analyzer
-    if (process.env.ANALYZE === 'true') {
-      const { BundleAnalyzerPlugin } = require('@next/bundle-analyzer')();
-      config.plugins.push(
-        new BundleAnalyzerPlugin({
-          analyzerMode: 'static',
-          openAnalyzer: false,
-        })
-      );
-    }
-    
+    // Custom webpack configurations can be added here
+    // Bundle analyzer removed to avoid dependency issues
+
     // Custom webpack rules
     config.module.rules.push({
       test: /\.svg$/,
       use: ['@svgr/webpack'],
     });
-    
+
     // Resolve aliases
     config.resolve.alias = {
       ...config.resolve.alias,
@@ -166,7 +203,7 @@ const nextConfig = {
       '@/utils': path.resolve(__dirname, 'src/utils'),
       '@/styles': path.resolve(__dirname, 'src/styles'),
     };
-    
+
     // Optimization
     if (!dev && !isServer) {
       config.optimization.splitChunks = {
@@ -186,40 +223,35 @@ const nextConfig = {
         },
       };
     }
-    
+
     return config;
   },
-  
+
   // Output configuration
   output: 'standalone',
-  
+
   // Compression
   compress: true,
-  
+
   // Power by header
   poweredByHeader: false,
-  
+
   // Generate ETags
   generateEtags: true,
-  
+
   // Page extensions
   pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
-  
+
   // Trailing slash
   trailingSlash: false,
-  
+
   // Asset prefix for CDN
   assetPrefix: process.env.NODE_ENV === 'production' ? process.env.CDN_URL : '',
-  
+
   // Base path
   basePath: process.env.BASE_PATH || '',
 };
 
 const path = require('path');
 
-// Bundle analyzer configuration
-const withBundleAnalyzer = require('@next/bundle-analyzer')({
-  enabled: process.env.ANALYZE === 'true',
-});
-
-module.exports = withBundleAnalyzer(nextConfig);
+module.exports = nextConfig;
