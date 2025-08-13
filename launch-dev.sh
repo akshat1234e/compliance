@@ -11,6 +11,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+PURPLE='\033[0;35m'
 NC='\033[0m'
 
 echo -e "${BLUE}"
@@ -43,6 +44,13 @@ fi
 
 echo -e "${GREEN}✅ npm $(npm --version) detected${NC}"
 
+# Sync environment files
+echo -e "${PURPLE}🔄 Synchronizing environment configuration...${NC}"
+if [ ! -f ".env.development" ]; then
+    echo -e "${YELLOW}⚠️  Development environment file not found. Creating from example...${NC}"
+    cp .env.example .env.development
+fi
+
 # Install dependencies if node_modules doesn't exist
 if [ ! -d "node_modules" ]; then
     echo -e "${BLUE}📦 Installing dependencies...${NC}"
@@ -58,7 +66,7 @@ fi
 # Create a simple development environment file
 if [ ! -f ".env.development" ]; then
     echo -e "${YELLOW}⚠️  Development environment file not found. Creating default configuration...${NC}"
-    
+
     cat > .env.development << EOF
 # RBI Compliance Platform - Development Environment
 NODE_ENV=development
@@ -87,14 +95,14 @@ ENABLE_ML_PREDICTIONS=false
 ENABLE_REAL_TIME_MONITORING=true
 DEBUG=true
 EOF
-    
+
     echo -e "${GREEN}✅ Development environment configuration created${NC}"
 fi
 
 # Create a simple package.json for the frontend if it doesn't exist
 if [ ! -f "frontend/package.json" ]; then
     echo -e "${BLUE}📝 Creating frontend package.json...${NC}"
-    
+
     cat > frontend/package.json << EOF
 {
   "name": "rbi-compliance-frontend",
@@ -125,14 +133,14 @@ echo -e "${BLUE}🚀 Starting development server...${NC}"
 # Check if we can start the frontend
 if [ -d "frontend" ] && [ -f "frontend/package.json" ]; then
     echo -e "${BLUE}🌐 Starting frontend development server...${NC}"
-    
+
     # Start frontend in background
     cd frontend
-    
+
     # Create a simple Next.js app structure if it doesn't exist
     if [ ! -f "next.config.js" ]; then
         echo -e "${BLUE}📝 Creating Next.js configuration...${NC}"
-        
+
         cat > next.config.js << EOF
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -146,10 +154,10 @@ const nextConfig = {
 module.exports = nextConfig
 EOF
     fi
-    
+
     # Create basic app structure
     mkdir -p src/app
-    
+
     if [ ! -f "src/app/page.tsx" ]; then
         cat > src/app/page.tsx << EOF
 'use client'
@@ -168,8 +176,8 @@ export default function Home() {
   }
 
   return (
-    <div style={{ 
-      minHeight: '100vh', 
+    <div style={{
+      minHeight: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       display: 'flex',
       alignItems: 'center',
@@ -184,16 +192,16 @@ export default function Home() {
         textAlign: 'center',
         maxWidth: '600px'
       }}>
-        <h1 style={{ 
-          fontSize: '2.5rem', 
-          fontWeight: 'bold', 
+        <h1 style={{
+          fontSize: '2.5rem',
+          fontWeight: 'bold',
           color: '#1f2937',
           marginBottom: '1rem'
         }}>
           🎉 RBI Compliance Platform
         </h1>
-        <p style={{ 
-          fontSize: '1.2rem', 
+        <p style={{
+          fontSize: '1.2rem',
           color: '#6b7280',
           marginBottom: '2rem'
         }}>
@@ -218,9 +226,9 @@ export default function Home() {
             <p style={{ fontSize: '0.9rem', color: '#6b7280' }}>Predictive Analytics</p>
           </div>
         </div>
-        <div style={{ 
-          padding: '1rem', 
-          background: '#ecfdf5', 
+        <div style={{
+          padding: '1rem',
+          background: '#ecfdf5',
           borderRadius: '0.5rem',
           border: '1px solid #d1fae5'
         }}>
@@ -235,7 +243,7 @@ export default function Home() {
 }
 EOF
     fi
-    
+
     if [ ! -f "src/app/layout.tsx" ]; then
         cat > src/app/layout.tsx << EOF
 export const metadata = {
@@ -256,18 +264,18 @@ export default function RootLayout({
 }
 EOF
     fi
-    
+
     # Install dependencies if needed
     if [ ! -d "node_modules" ]; then
         npm install
     fi
-    
+
     echo -e "${GREEN}✅ Starting Next.js development server...${NC}"
     echo -e "${BLUE}🌐 Frontend will be available at: http://localhost:3000${NC}"
-    
+
     # Start the development server
     npm run dev
-    
+
 else
     echo -e "${RED}❌ Frontend directory not found or invalid${NC}"
     exit 1
