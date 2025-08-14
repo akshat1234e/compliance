@@ -4,7 +4,7 @@ services:
   # =============================================================================
   # DATABASE SERVICES
   # =============================================================================
-  
+
   postgres:
     image: postgres:15-alpine
     container_name: rbi-postgres
@@ -199,6 +199,62 @@ services:
       timeout: 10s
       retries: 3
 
+  # =============================================================================
+  # APPLICATION SERVICES
+  # =============================================================================
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rbi-compliance-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      MONGODB_URI: mongodb://root:mongodb@mongodb:27017/rbi_compliance_docs_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: rbi_compliance_super_secret_jwt_key_2024
+      JWT_REFRESH_SECRET: rbi_compliance_super_secret_refresh_key_2024
+      FRONTEND_URL: http://localhost:3000
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - rbi-network
+    command: npm run dev
+
+  # Frontend Application
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rbi-compliance-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:5000/api/v1
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:5000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - rbi-network
+    command: npm run dev
+
 # =============================================================================
 # VOLUMES
 # =============================================================================
@@ -210,6 +266,8 @@ volumes:
   elasticsearch_data:
   rabbitmq_data:
   kong_data:
+  backend_uploads:
+  backend_logs:
 
 # =============================================================================
 # NETWORKS
