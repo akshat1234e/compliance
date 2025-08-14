@@ -1,11 +1,12 @@
 import { configureStore } from '@reduxjs/toolkit'
 import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux'
 import authSlice from './slices/authSlice'
-import dashboardSlice from './slices/dashboardSlice'
-import connectorsSlice from './slices/connectorsSlice'
-import webhooksSlice from './slices/webhooksSlice'
-import monitoringSlice from './slices/monitoringSlice'
 import complianceSlice from './slices/complianceSlice'
+import connectorsSlice from './slices/connectorsSlice'
+import dashboardSlice from './slices/dashboardSlice'
+import intelligenceSlice from './slices/intelligenceSlice'
+import monitoringSlice from './slices/monitoringSlice'
+import webhooksSlice from './slices/webhooksSlice'
 import workflowSlice from './slices/workflowSlice'
 
 export const store = configureStore({
@@ -17,6 +18,7 @@ export const store = configureStore({
     monitoring: monitoringSlice,
     compliance: complianceSlice,
     workflow: workflowSlice,
+    intelligence: intelligenceSlice,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
