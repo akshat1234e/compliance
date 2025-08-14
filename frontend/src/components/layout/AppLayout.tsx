@@ -7,13 +7,12 @@ import {
     Bars3Icon,
     BellIcon,
     ChartBarIcon,
-    Cog6ToothIcon,
     DocumentTextIcon,
     HomeIcon,
     ServerIcon,
     ShieldCheckIcon,
     UserCircleIcon,
-    XMarkIcon,
+    XMarkIcon
 } from '@heroicons/react/24/outline'
 import { clsx } from 'clsx'
 import Link from 'next/link'
@@ -22,13 +21,14 @@ import { Fragment, useState } from 'react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-  { name: 'Connectors', href: '/dashboard/connectors', icon: ServerIcon },
-  { name: 'Monitoring', href: '/dashboard/monitoring', icon: ChartBarIcon },
+  { name: 'Regulatory Intelligence', href: '/dashboard/regulatory', icon: DocumentTextIcon },
+  { name: 'Compliance Workflows', href: '/dashboard/compliance', icon: ShieldCheckIcon },
+  { name: 'Document Management', href: '/dashboard/documents', icon: DocumentTextIcon },
+  { name: 'Risk Assessment', href: '/dashboard/risk', icon: ShieldCheckIcon },
+  { name: 'Analytics & Reports', href: '/dashboard/analytics', icon: ChartBarIcon },
+  { name: 'Real-time Monitoring', href: '/dashboard/monitoring', icon: ChartBarIcon },
+  { name: 'System Integrations', href: '/dashboard/integrations', icon: ServerIcon },
   { name: 'Webhooks', href: '/dashboard/webhooks', icon: BellIcon },
-  { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheckIcon },
-  { name: 'Regulatory', href: '/dashboard/regulatory', icon: DocumentTextIcon },
-  { name: 'Reports', href: '/dashboard/reports', icon: DocumentTextIcon },
-  { name: 'Settings', href: '/dashboard/settings', icon: Cog6ToothIcon },
 ]
 
 interface AppLayoutProps {

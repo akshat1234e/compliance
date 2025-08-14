@@ -1,7 +1,7 @@
-import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { Request, Response, Router } from 'express';
 import { body, validationResult } from 'express-validator';
+import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -34,7 +34,7 @@ const users = [
 router.post('/login', [
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 6 }),
-], async (req, res) => {
+], async (req: Request, res: Response) => {
   try {
     // Check validation errors
     const errors = validationResult(req);
@@ -117,7 +117,7 @@ router.post('/register', [
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 6 }),
   body('name').isLength({ min: 2 }),
-], async (req, res) => {
+], async (req: Request, res: Response) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -180,7 +180,7 @@ router.post('/register', [
 });
 
 // Logout endpoint
-router.post('/logout', (req, res) => {
+router.post('/logout', (req: Request, res: Response) => {
   // In a real implementation, you would invalidate the token
   logger.info('User logged out');
   res.json({
@@ -190,7 +190,7 @@ router.post('/logout', (req, res) => {
 });
 
 // Refresh token endpoint
-router.post('/refresh', (req, res) => {
+router.post('/refresh', (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
 
@@ -245,10 +245,10 @@ router.post('/refresh', (req, res) => {
 });
 
 // Get current user endpoint
-router.get('/me', (req, res) => {
+router.get('/me', (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!token) {
       return res.status(401).json({
         error: 'No token provided',
