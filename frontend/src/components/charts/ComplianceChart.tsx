@@ -7,12 +7,12 @@ const complianceData = [
 ]
 
 const monthlyData = [
-  { month: 'Jan', compliant: 82, total: 100 },
-  { month: 'Feb', compliant: 85, total: 100 },
-  { month: 'Mar', compliant: 88, total: 100 },
-  { month: 'Apr', compliant: 85, total: 100 },
-  { month: 'May', compliant: 90, total: 100 },
-  { month: 'Jun', compliant: 92, total: 100 }
+  { month: 'Jan', compliant: 82 },
+  { month: 'Feb', compliant: 85 },
+  { month: 'Mar', compliant: 88 },
+  { month: 'Apr', compliant: 85 },
+  { month: 'May', compliant: 90 },
+  { month: 'Jun', compliant: 92 }
 ]
 
 export function CompliancePieChart() {
@@ -28,7 +28,6 @@ export function CompliancePieChart() {
             innerRadius={60}
             outerRadius={100}
             dataKey="value"
-            label={({ name, value }) => `${name}: ${value}%`}
           >
             {complianceData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />

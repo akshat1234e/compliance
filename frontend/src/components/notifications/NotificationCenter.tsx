@@ -36,20 +36,6 @@ export function NotificationCenter() {
       }
     ]
     setNotifications(mockNotifications)
-
-    const interval = setInterval(() => {
-      const newNotification: Notification = {
-        id: Date.now().toString(),
-        title: 'Real-time Update',
-        message: 'System status updated',
-        type: 'info',
-        timestamp: new Date(),
-        read: false
-      }
-      setNotifications(prev => [newNotification, ...prev.slice(0, 9)])
-    }, 30000)
-
-    return () => clearInterval(interval)
   }, [])
 
   const unreadCount = notifications.filter(n => !n.read).length
@@ -58,15 +44,6 @@ export function NotificationCenter() {
     setNotifications(prev => 
       prev.map(n => n.id === id ? { ...n, read: true } : n)
     )
-  }
-
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'success': return 'bg-green-100'
-      case 'warning': return 'bg-yellow-100'
-      case 'error': return 'bg-red-100'
-      default: return 'bg-blue-100'
-    }
   }
 
   return (
@@ -106,7 +83,6 @@ export function NotificationCenter() {
                 onClick={() => markAsRead(notification.id)}
               >
                 <div className="flex items-start space-x-3">
-                  <div className={`w-2 h-2 rounded-full mt-2 ${getTypeColor(notification.type)}`} />
                   <div className="flex-1">
                     <h4 className="text-sm font-medium text-gray-900">
                       {notification.title}
