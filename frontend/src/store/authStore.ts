@@ -16,9 +16,9 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  isAuthenticated: false,
-  token: null,
+  user: { id: '1', name: 'Admin User', email: 'admin@example.com', role: 'admin' },
+  isAuthenticated: true,
+  token: 'mock-token',
   login: async (email: string, password: string) => {
     const mockUser = { id: '1', name: 'Admin User', email, role: 'admin' }
     set({ user: mockUser, isAuthenticated: true, token: 'mock-token' })
