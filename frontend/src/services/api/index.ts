@@ -70,6 +70,9 @@ export const authAPI = {
     apiClient.post('/api/auth/register', userData),
 }
 
+// Export aliases for backward compatibility
+export const authApi = authAPI
+
 // Gateway API
 export const gatewayAPI = {
   getConnectorStatus: () =>
@@ -250,6 +253,12 @@ export const documentAPI = {
   getTemplates: () =>
     apiClient.get('/api/documents/templates'),
 }
+
+// Export aliases for backward compatibility
+export const complianceApi = complianceAPI
+export const regulatoryApi = regulatoryAPI
+export const monitoringApi = monitoringAPI
+export const webhooksApi = webhookAPI
 
 // Export the main API client for custom requests
 export { apiClient }

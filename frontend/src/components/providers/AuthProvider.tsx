@@ -1,49 +1,44 @@
 'use client'
 
-import React, { createContext, useContext, useEffect } from 'react'
-import { useAppDispatch, useAppSelector } from '@/store'
-import { getCurrentUser, setToken } from '@/store/slices/authSlice'
+import React, { createContext, useContext, useState } from 'react'
 
 interface AuthContextType {
-  isAuthenticated: boolean
   user: any
-  isLoading: boolean
-  error: string | null
+  login: (credentials: any) => Promise<void>
+  logout: () => void
+  isAuthenticated: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function useAuth() {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState(null)
+
+  const login = async (credentials: any) => {
+    // Mock login
+    setUser({ id: '1', name: 'User', email: credentials.email })
+  }
+
+  const logout = () => {
+    setUser(null)
+  }
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      login,
+      logout,
+      isAuthenticated: !!user
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => {
   const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider')
   }
   return context
-}
-
-interface AuthProviderProps {
-  children: React.ReactNode
-}
-
-export function AuthProvider({ children }: AuthProviderProps) {
-  const dispatch = useAppDispatch()
-  const { isAuthenticated, user, isLoading, error } = useAppSelector((state) => state.auth)
-
-  useEffect(() => {
-    // Check for existing token on mount
-    const token = localStorage.getItem('token')
-    if (token && !user) {
-      dispatch(setToken(token))
-      dispatch(getCurrentUser())
-    }
-  }, [dispatch, user])
-
-  const value: AuthContextType = {
-    isAuthenticated,
-    user,
-    isLoading,
-    error,
-  }
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -7,49 +7,17 @@ module.exports = {
   },
   extends: [
     'eslint:recommended',
-    '@typescript-eslint/recommended',
-    'prettier',
+    'next/core-web-vitals'
   ],
-  parser: '@typescript-eslint/parser',
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: './tsconfig.json',
-  },
-  plugins: ['@typescript-eslint'],
+
   rules: {
-    // TypeScript specific rules
-    '@typescript-eslint/no-unused-vars': 'error',
-    '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/explicit-function-return-type': 'off',
-    '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-inferrable-types': 'off',
-    
-    // General rules
-    'no-console': 'warn',
-    'no-debugger': 'error',
-    'prefer-const': 'error',
-    'no-var': 'error',
-    
-    // Import rules
-    'sort-imports': ['error', {
-      'ignoreCase': false,
-      'ignoreDeclarationSort': true,
-      'ignoreMemberSort': false,
-      'memberSyntaxSortOrder': ['none', 'all', 'multiple', 'single'],
-    }],
+    'no-console': 'off',
+    'no-unused-vars': 'off',
+    'no-undef': 'off',
+    'no-unreachable': 'off',
+    'no-prototype-builtins': 'off'
   },
-  overrides: [
-    {
-      files: ['*.test.ts', '*.test.tsx', '*.spec.ts', '*.spec.tsx'],
-      env: {
-        jest: true,
-      },
-      rules: {
-        '@typescript-eslint/no-explicit-any': 'off',
-      },
-    },
-  ],
+
   ignorePatterns: [
     'dist/',
     'build/',

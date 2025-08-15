@@ -1,128 +1,153 @@
 'use client'
 
-import HeaderNavigation from '@/components/navigation/HeaderNavigation'
-import SidebarNavigation from '@/components/navigation/SidebarNavigation'
 import { useState } from 'react'
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { 
+  HomeIcon, 
+  ChartBarIcon, 
+  DocumentTextIcon, 
+  ShieldCheckIcon,
+  ExclamationTriangleIcon,
+  CogIcon,
+  BellIcon,
+  UserIcon,
+  Bars3Icon,
+  XMarkIcon,
+  ArrowRightOnRectangleIcon
+} from '@heroicons/react/24/outline'
+import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { NotificationCenter } from '@/components/notifications/NotificationCenter'
+
+const navigation = [
+  { name: 'Overview', href: '/dashboard', icon: HomeIcon },
+  { name: 'Connectors', href: '/dashboard/connectors', icon: ChartBarIcon },
+  { name: 'Compliance', href: '/dashboard/compliance', icon: ShieldCheckIcon },
+  { name: 'Risk Assessment', href: '/dashboard/risk', icon: ExclamationTriangleIcon },
+  { name: 'Documents', href: '/dashboard/documents', icon: DocumentTextIcon },
+  { name: 'Workflows', href: '/dashboard/workflows', icon: CogIcon },
+  { name: 'Regulatory', href: '/dashboard/regulatory', icon: BellIcon },
+]
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const pathname = usePathname()
+  const router = useRouter()
+  const { user, logout } = useAuthStore()
 
-  // Mock user data (in real app, this would come from auth context)
-  const user = {
-    name: 'Admin User',
-    email: 'admin@compliance.com',
-    role: 'Administrator'
-  }
-
-  // Mock notifications data
-  const notifications = {
-    count: 3,
-    items: [
-      {
-        id: '1',
-        title: 'New RBI Circular',
-        message: 'RBI/2024/15 - Updated KYC Guidelines',
-        type: 'info' as const,
-        timestamp: '2 hours ago',
-        read: false
-      },
-      {
-        id: '2',
-        title: 'Compliance Deadline',
-        message: 'Risk assessment report due in 3 days',
-        type: 'warning' as const,
-        timestamp: '4 hours ago',
-        read: false
-      },
-      {
-        id: '3',
-        title: 'System Alert',
-        message: 'High risk transaction detected',
-        type: 'error' as const,
-        timestamp: '6 hours ago',
-        read: true
-      }
-    ]
-  }
-
-  const handleSearch = (query: string) => {
-    // Implement search functionality
-    console.log('Search query:', query)
-  }
-
-  const handleNotificationClick = (notificationId: string) => {
-    // Handle notification click
-    console.log('Notification clicked:', notificationId)
+  const handleLogout = () => {
+    logout()
+    router.push('/login')
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header Navigation */}
-      <HeaderNavigation
-        user={user}
-        notifications={notifications}
-        onSearch={handleSearch}
-        onNotificationClick={handleNotificationClick}
-      />
-
-      {/* Sidebar Navigation */}
-      <SidebarNavigation
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      {/* Main Content Area */}
-      <div
-        className={`transition-all duration-300 ease-in-out ${
-          sidebarCollapsed ? 'ml-16' : 'ml-72'
-        }`}
-        style={{ paddingTop: '64px' }} // Account for fixed header
-      >
-        {/* Breadcrumb Navigation */}
-        <div className="bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8 py-3">
-          <nav className="flex" aria-label="Breadcrumb">
-            <ol className="flex items-center space-x-2">
-              <li>
-                <div className="flex items-center">
-                  <a href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">
-                    Dashboard
-                  </a>
-                </div>
-              </li>
-              {/* Additional breadcrumb items would be added here based on current route */}
-            </ol>
+      {/* Mobile sidebar */}
+      <div className={cn(
+        "fixed inset-0 z-50 lg:hidden",
+        sidebarOpen ? "block" : "hidden"
+      )}>
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl">
+          <div className="flex h-16 items-center justify-between px-4">
+            <h1 className="text-xl font-bold text-gray-900">RegTech</h1>
+            <button onClick={() => setSidebarOpen(false)}>
+              <XMarkIcon className="h-6 w-6" />
+            </button>
+          </div>
+          <nav className="flex-1 space-y-1 px-2 py-4">
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  "group flex items-center px-2 py-2 text-sm font-medium rounded-md",
+                  pathname === item.href
+                    ? "bg-brand-100 text-brand-700"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                )}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <item.icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                {item.name}
+              </Link>
+            ))}
           </nav>
         </div>
+      </div>
 
-        {/* Page Content */}
-        <main className="flex-1">
-          <div className="py-6">
-            <div className="px-4 sm:px-6 lg:px-8">
-              {children}
+      {/* Desktop sidebar */}
+      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div className="flex flex-col flex-grow bg-white border-r border-gray-200 shadow-sm">
+          <div className="flex h-16 items-center px-4 border-b border-gray-200">
+            <h1 className="text-xl font-bold text-gray-900">RegTech Platform</h1>
+          </div>
+          <nav className="flex-1 space-y-1 px-2 py-4">
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  "group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors",
+                  pathname === item.href
+                    ? "bg-brand-100 text-brand-700 border-r-2 border-brand-600"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                )}
+              >
+                <item.icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                {item.name}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="lg:pl-64">
+        {/* Top bar */}
+        <div className="sticky top-0 z-40 bg-white shadow-sm border-b border-gray-200">
+          <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+            <button
+              className="lg:hidden"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Bars3Icon className="h-6 w-6" />
+            </button>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <div className="h-2 w-2 bg-green-400 rounded-full"></div>
+                <span className="text-sm text-gray-600">System Online</span>
+              </div>
+              
+              <NotificationCenter />
+              
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">{user?.name}</span>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 text-gray-400 hover:text-gray-600"
+                  title="Logout"
+                >
+                  <ArrowRightOnRectangleIcon className="h-5 w-5" />
+                </button>
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Page content */}
+        <main className="p-4 sm:p-6 lg:p-8">
+          <AuthGuard>
+            {children}
+          </AuthGuard>
         </main>
-
-        {/* Footer */}
-        <footer className="bg-white border-t border-gray-200 px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4 text-sm text-gray-500">
-              <span>© 2024 RBI Compliance Platform</span>
-              <span>•</span>
-              <span className="flex items-center">
-                <span className="inline-block w-2 h-2 bg-success-500 rounded-full mr-2"></span>
-                System Status: Operational
-              </span>
-            </div>
-            <div className="text-sm text-gray-500">
-              Last updated: {new Date().toLocaleString()}
-            </div>
-          </div>
-        </footer>
       </div>
     </div>
   )

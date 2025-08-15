@@ -1,359 +1,219 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from 'react-query'
-import { AppLayout } from '@/components/layout/AppLayout'
-import { regulatoryAPI } from '@/services/api'
-import { LoadingSpinner } from '@/components/ui/Loading'
-import { Button } from '@/components/ui/Button'
 import { 
+  BellIcon, 
   DocumentTextIcon, 
-  ExclamationTriangleIcon, 
-  CheckCircleIcon,
+  ExclamationTriangleIcon,
   ClockIcon,
-  MagnifyingGlassIcon,
-  FunnelIcon
+  CheckCircleIcon,
+  EyeIcon
 } from '@heroicons/react/24/outline'
-import Link from 'next/link'
+
+const circulars = [
+  {
+    id: 1,
+    number: 'DBOD.No.123/2024',
+    title: 'Guidelines on Digital Lending Platforms',
+    date: '2024-03-20',
+    effectiveDate: '2024-04-01',
+    category: 'Digital Banking',
+    impact: 'high',
+    status: 'new',
+    summary: 'New guidelines for digital lending platforms and third-party partnerships'
+  },
+  {
+    id: 2,
+    number: 'DPSS.CO.PD.No.456/2024',
+    title: 'Updated KYC Norms for Payment Banks',
+    date: '2024-03-18',
+    effectiveDate: '2024-03-25',
+    category: 'KYC/AML',
+    impact: 'medium',
+    status: 'reviewed',
+    summary: 'Enhanced customer verification requirements for payment banking services'
+  },
+  {
+    id: 3,
+    number: 'RBI/2024-25/789',
+    title: 'Cyber Security Framework Updates',
+    date: '2024-03-15',
+    effectiveDate: '2024-04-15',
+    category: 'Cyber Security',
+    impact: 'high',
+    status: 'implemented',
+    summary: 'Updated cybersecurity guidelines and incident reporting requirements'
+  },
+]
+
+const getImpactColor = (impact: string) => {
+  switch (impact) {
+    case 'high': return 'bg-red-100 text-red-700'
+    case 'medium': return 'bg-yellow-100 text-yellow-700'
+    case 'low': return 'bg-green-100 text-green-700'
+    default: return 'bg-gray-100 text-gray-700'
+  }
+}
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'new': return <BellIcon className="h-4 w-4 text-blue-500" />
+    case 'reviewed': return <ClockIcon className="h-4 w-4 text-yellow-500" />
+    case 'implemented': return <CheckCircleIcon className="h-4 w-4 text-green-500" />
+    default: return <DocumentTextIcon className="h-4 w-4 text-gray-500" />
+  }
+}
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'new': return 'bg-blue-100 text-blue-700'
+    case 'reviewed': return 'bg-yellow-100 text-yellow-700'
+    case 'implemented': return 'bg-green-100 text-green-700'
+    default: return 'bg-gray-100 text-gray-700'
+  }
+}
 
 export default function RegulatoryPage() {
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState('all')
-  const [filterCategory, setFilterCategory] = useState('all')
+  const [filter, setFilter] = useState('all')
 
-  const { data: circulars, isLoading: circularsLoading } = useQuery(
-    ['regulatory-circulars', { search: searchTerm, status: filterStatus, category: filterCategory }],
-    () => regulatoryAPI.getCirculars({ 
-      search: searchTerm || undefined,
-      status: filterStatus !== 'all' ? filterStatus : undefined,
-      category: filterCategory !== 'all' ? filterCategory : undefined
-    }),
-    { refetchInterval: 300000 } // Refresh every 5 minutes
+  const filteredCirculars = circulars.filter(circular => 
+    filter === 'all' || circular.status === filter
   )
-
-  const { data: updates, isLoading: updatesLoading } = useQuery(
-    'regulatory-updates',
-    regulatoryAPI.getUpdates,
-    { refetchInterval: 300000 }
-  )
-
-  const isLoading = circularsLoading || updatesLoading
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'compliant':
-        return <CheckCircleIcon className="h-5 w-5 text-green-500" />
-      case 'pending':
-        return <ClockIcon className="h-5 w-5 text-yellow-500" />
-      case 'non_compliant':
-        return <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />
-      default:
-        return <DocumentTextIcon className="h-5 w-5 text-gray-400" />
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'compliant':
-        return 'text-green-600 bg-green-50 border-green-200'
-      case 'pending':
-        return 'text-yellow-600 bg-yellow-50 border-yellow-200'
-      case 'non_compliant':
-        return 'text-red-600 bg-red-50 border-red-200'
-      default:
-        return 'text-gray-600 bg-gray-50 border-gray-200'
-    }
-  }
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high':
-        return 'text-red-600 bg-red-50'
-      case 'medium':
-        return 'text-yellow-600 bg-yellow-50'
-      case 'low':
-        return 'text-green-600 bg-green-50'
-      default:
-        return 'text-gray-600 bg-gray-50'
-    }
-  }
-
-  const mockCirculars = circulars || [
-    {
-      id: 'RBI/2024/001',
-      title: 'Guidelines on Digital Payment Security Framework',
-      category: 'Digital Payments',
-      issuedDate: '2024-01-15',
-      effectiveDate: '2024-04-01',
-      priority: 'high',
-      status: 'pending',
-      description: 'New guidelines for enhancing security in digital payment systems',
-      impactLevel: 'high',
-      complianceDeadline: '2024-03-31'
-    },
-    {
-      id: 'RBI/2024/002',
-      title: 'Updated KYC Norms for Banking Institutions',
-      category: 'KYC/AML',
-      issuedDate: '2024-01-10',
-      effectiveDate: '2024-02-15',
-      priority: 'high',
-      status: 'compliant',
-      description: 'Revised know your customer norms and documentation requirements',
-      impactLevel: 'medium',
-      complianceDeadline: '2024-02-14'
-    },
-    {
-      id: 'RBI/2024/003',
-      title: 'Risk Management Framework for NBFCs',
-      category: 'Risk Management',
-      issuedDate: '2024-01-05',
-      effectiveDate: '2024-06-01',
-      priority: 'medium',
-      status: 'pending',
-      description: 'Comprehensive risk management guidelines for non-banking financial companies',
-      impactLevel: 'high',
-      complianceDeadline: '2024-05-31'
-    }
-  ]
-
-  const filteredCirculars = mockCirculars.filter(circular => {
-    const matchesSearch = !searchTerm || 
-      circular.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      circular.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      circular.category.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesStatus = filterStatus === 'all' || circular.status === filterStatus
-    const matchesCategory = filterCategory === 'all' || circular.category === filterCategory
-    
-    return matchesSearch && matchesStatus && matchesCategory
-  })
-
-  const categories = [...new Set(mockCirculars.map(c => c.category))]
 
   return (
-    <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="md:flex md:items-center md:justify-between">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
-              Regulatory Management
-            </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Monitor RBI circulars, compliance status, and regulatory updates
-            </p>
-          </div>
-          <div className="mt-4 flex md:ml-4 md:mt-0 space-x-3">
-            <Link href="/dashboard/regulatory/impact-analysis">
-              <Button variant="outline">
-                Impact Analysis
-              </Button>
-            </Link>
-            <Link href="/dashboard/regulatory/compliance-tracker">
-              <Button variant="primary">
-                Compliance Tracker
-              </Button>
-            </Link>
-          </div>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Regulatory Intelligence</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Monitor RBI circulars and regulatory updates
+          </p>
         </div>
+        <button className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 transition-colors">
+          Sync Updates
+        </button>
+      </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <DocumentTextIcon className="h-6 w-6 text-blue-600" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Total Circulars</dt>
-                    <dd className="text-lg font-medium text-gray-900">{mockCirculars.length}</dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <ClockIcon className="h-6 w-6 text-yellow-600" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Pending Compliance</dt>
-                    <dd className="text-lg font-medium text-gray-900">
-                      {mockCirculars.filter(c => c.status === 'pending').length}
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <CheckCircleIcon className="h-6 w-6 text-green-600" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Compliant</dt>
-                    <dd className="text-lg font-medium text-gray-900">
-                      {mockCirculars.filter(c => c.status === 'compliant').length}
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="p-5">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <ExclamationTriangleIcon className="h-6 w-6 text-red-600" />
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">High Priority</dt>
-                    <dd className="text-lg font-medium text-gray-900">
-                      {mockCirculars.filter(c => c.priority === 'high').length}
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Filters and Search */}
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <MagnifyingGlassIcon className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="text"
-                placeholder="Search circulars..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-              />
-            </div>
-
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="compliant">Compliant</option>
-              <option value="non_compliant">Non-Compliant</option>
-            </select>
-
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-            >
-              <option value="all">All Categories</option>
-              {categories.map(category => (
-                <option key={category} value={category}>{category}</option>
-              ))}
-            </select>
-
-            <Button variant="outline" className="flex items-center">
-              <FunnelIcon className="h-4 w-4 mr-2" />
-              Advanced Filters
-            </Button>
-          </div>
-        </div>
-
-        {/* Circulars List */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium text-gray-900">RBI Circulars</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              {filteredCirculars.length} of {mockCirculars.length} circulars
-            </p>
-          </div>
-
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <LoadingSpinner size="lg" />
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {filteredCirculars.map((circular) => (
-                <div key={circular.id} className="p-6 hover:bg-gray-50">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3">
-                        {getStatusIcon(circular.status)}
-                        <Link 
-                          href={`/dashboard/regulatory/circulars/${circular.id}`}
-                          className="text-lg font-medium text-gray-900 hover:text-indigo-600"
-                        >
-                          {circular.title}
-                        </Link>
-                      </div>
-                      
-                      <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
-                        <span className="font-medium">{circular.id}</span>
-                        <span>•</span>
-                        <span>{circular.category}</span>
-                        <span>•</span>
-                        <span>Issued: {new Date(circular.issuedDate).toLocaleDateString()}</span>
-                        <span>•</span>
-                        <span>Effective: {new Date(circular.effectiveDate).toLocaleDateString()}</span>
-                      </div>
-                      
-                      <p className="mt-2 text-sm text-gray-600">{circular.description}</p>
-                      
-                      <div className="mt-3 flex items-center space-x-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusColor(circular.status)}`}>
-                          {circular.status.replace('_', ' ')}
-                        </span>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getPriorityColor(circular.priority)}`}>
-                          {circular.priority} Priority
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          Compliance Deadline: {new Date(circular.complianceDeadline).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <div className="ml-6 flex-shrink-0">
-                      <Link href={`/dashboard/regulatory/circulars/${circular.id}`}>
-                        <Button variant="outline" size="sm">
-                          View Details
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!isLoading && filteredCirculars.length === 0 && (
-            <div className="text-center py-12">
-              <DocumentTextIcon className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No circulars found</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Try adjusting your search or filter criteria.
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <BellIcon className="h-8 w-8 text-blue-500" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">New Circulars</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {circulars.filter(c => c.status === 'new').length}
               </p>
             </div>
-          )}
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <ClockIcon className="h-8 w-8 text-yellow-500" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Under Review</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {circulars.filter(c => c.status === 'reviewed').length}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <CheckCircleIcon className="h-8 w-8 text-green-500" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Implemented</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {circulars.filter(c => c.status === 'implemented').length}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <ExclamationTriangleIcon className="h-8 w-8 text-red-500" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">High Impact</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {circulars.filter(c => c.impact === 'high').length}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
-    </AppLayout>
+
+      <div className="flex space-x-2">
+        {['all', 'new', 'reviewed', 'implemented'].map((status) => (
+          <button
+            key={status}
+            onClick={() => setFilter(status)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              filter === status
+                ? 'bg-brand-100 text-brand-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">RBI Circulars</h3>
+        </div>
+        <div className="divide-y divide-gray-200">
+          {filteredCirculars.map((circular) => (
+            <div key={circular.id} className="p-6 hover:bg-gray-50 transition-colors">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center space-x-3">
+                    {getStatusIcon(circular.status)}
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900">{circular.title}</h4>
+                      <p className="text-sm text-gray-500">{circular.number}</p>
+                    </div>
+                  </div>
+                  
+                  <p className="mt-2 text-sm text-gray-600">{circular.summary}</p>
+                  
+                  <div className="mt-4 flex items-center space-x-6">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">Published:</span>
+                      <span className="text-xs font-medium text-gray-900">{circular.date}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">Effective:</span>
+                      <span className="text-xs font-medium text-gray-900">{circular.effectiveDate}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-500">Category:</span>
+                      <span className="text-xs font-medium text-gray-900">{circular.category}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-3 flex items-center space-x-3">
+                    <span className={`px-2 py-1 text-xs font-medium rounded ${getStatusColor(circular.status)}`}>
+                      {circular.status}
+                    </span>
+                    <span className={`px-2 py-1 text-xs font-medium rounded ${getImpactColor(circular.impact)}`}>
+                      {circular.impact} impact
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="ml-4 flex items-center space-x-2">
+                  <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+                    <EyeIcon className="h-4 w-4" />
+                  </button>
+                  <button className="text-brand-600 hover:text-brand-700 text-sm font-medium">
+                    View Details
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }

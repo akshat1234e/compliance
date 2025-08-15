@@ -10,8 +10,8 @@ import {
     DocumentChartBarIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useQuery } from 'react-query'
 
 // Mock data for development
 const mockAnalyticsData = {
@@ -323,7 +323,7 @@ export default function AnalyticsPage() {
         <div className="bg-white shadow rounded-lg p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Compliance by Category</h3>
           <div className="space-y-4">
-            {analytics.complianceByCategory.map((item) => (
+            {analytics.complianceByCategory.map((item: any) => (
               <div key={item.category}>
                 <div className="flex justify-between text-sm font-medium text-gray-900">
                   <span>{item.category}</span>
@@ -344,7 +344,7 @@ export default function AnalyticsPage() {
         <div className="bg-white shadow rounded-lg p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Risk Distribution</h3>
           <div className="space-y-4">
-            {analytics.riskDistribution.map((item) => (
+            {analytics.riskDistribution.map((item: any) => (
               <div key={item.level} className="flex items-center justify-between">
                 <div className="flex items-center">
                   <div className={`w-3 h-3 rounded-full mr-3 ${
@@ -367,7 +367,7 @@ export default function AnalyticsPage() {
           <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
           <div className="flow-root">
             <ul className="-mb-8">
-              {analytics.recentActivity.map((activity, activityIdx) => (
+              {analytics.recentActivity.map((activity: any, activityIdx: number) => (
                 <li key={activity.id}>
                   <div className="relative pb-8">
                     {activityIdx !== analytics.recentActivity.length - 1 ? (
@@ -405,7 +405,7 @@ export default function AnalyticsPage() {
         <div className="bg-white shadow rounded-lg p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Upcoming Deadlines</h3>
           <div className="space-y-4">
-            {analytics.upcomingDeadlines.map((deadline) => (
+            {analytics.upcomingDeadlines.map((deadline: any) => (
               <div key={deadline.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div className="flex items-center space-x-3">
                   <CalendarIcon className="h-5 w-5 text-gray-400" />

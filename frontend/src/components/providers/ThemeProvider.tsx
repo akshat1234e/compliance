@@ -1,70 +1,34 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
-
-type Theme = 'light' | 'dark' | 'system'
+import React, { createContext, useContext, useState } from 'react'
 
 interface ThemeContextType {
-  theme: Theme
-  setTheme: (theme: Theme) => void
-  resolvedTheme: 'light' | 'dark'
+  theme: 'light' | 'dark'
+  toggleTheme: () => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
-export function useTheme() {
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'light' ? 'dark' : 'light')
+  }
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      <div className={theme}>
+        {children}
+      </div>
+    </ThemeContext.Provider>
+  )
+}
+
+export const useTheme = () => {
   const context = useContext(ThemeContext)
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider')
+  if (!context) {
+    throw new Error('useTheme must be used within ThemeProvider')
   }
   return context
-}
-
-interface ThemeProviderProps {
-  children: React.ReactNode
-  defaultTheme?: Theme
-}
-
-export function ThemeProvider({ children, defaultTheme = 'system' }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(defaultTheme)
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
-
-  useEffect(() => {
-    // Load theme from localStorage
-    const savedTheme = localStorage.getItem('theme') as Theme
-    if (savedTheme) {
-      setTheme(savedTheme)
-    }
-  }, [])
-
-  useEffect(() => {
-    // Save theme to localStorage
-    localStorage.setItem('theme', theme)
-
-    // Resolve theme
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      setResolvedTheme(systemTheme)
-    } else {
-      setResolvedTheme(theme)
-    }
-  }, [theme])
-
-  useEffect(() => {
-    // Apply theme to document
-    const root = document.documentElement
-    if (resolvedTheme === 'dark') {
-      root.classList.add('dark')
-    } else {
-      root.classList.remove('dark')
-    }
-  }, [resolvedTheme])
-
-  const value: ThemeContextType = {
-    theme,
-    setTheme,
-    resolvedTheme,
-  }
-
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

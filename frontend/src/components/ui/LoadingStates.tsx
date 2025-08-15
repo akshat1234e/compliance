@@ -1,7 +1,7 @@
 'use client'
 
+import { ArrowPathIcon, ExclamationTriangleIcon, SparklesIcon, WifiIcon } from '@heroicons/react/24/outline'
 import React from 'react'
-import { SparklesIcon } from '@heroicons/react/24/outline'
 
 // Page Loading Spinner
 export function PageLoader({ message = 'Loading...' }: { message?: string }) {
@@ -69,7 +69,7 @@ export function SkeletonTable({ rows = 5, columns = 4 }: { rows?: number, column
           ))}
         </div>
       </div>
-      
+
       {/* Rows */}
       <div className="divide-y divide-gray-200">
         {Array.from({ length: rows }).map((_, rowIndex) => (
@@ -131,12 +131,12 @@ export function SkeletonDashboard() {
 }
 
 // Button Loading State
-export function LoadingButton({ 
-  loading, 
-  children, 
+export function LoadingButton({
+  loading,
+  children,
   className = '',
-  ...props 
-}: { 
+  ...props
+}: {
   loading: boolean
   children: React.ReactNode
   className?: string
@@ -171,17 +171,17 @@ export function InlineLoader({ message = 'Loading...' }: { message?: string }) {
 }
 
 // Progress Bar
-export function ProgressBar({ 
-  progress, 
+export function ProgressBar({
+  progress,
   className = '',
-  showPercentage = true 
-}: { 
+  showPercentage = true
+}: {
   progress: number
   className?: string
   showPercentage?: boolean
 }) {
   const clampedProgress = Math.min(Math.max(progress, 0), 100)
-  
+
   return (
     <div className={`w-full ${className}`}>
       <div className="flex justify-between items-center mb-1">
@@ -191,7 +191,7 @@ export function ProgressBar({
         )}
       </div>
       <div className="w-full bg-gray-200 rounded-full h-2">
-        <div 
+        <div
           className="bg-primary-600 h-2 rounded-full transition-all duration-300 ease-out"
           style={{ width: `${clampedProgress}%` }}
         ></div>
@@ -205,6 +205,123 @@ export function PulseWrapper({ children, className = '' }: { children: React.Rea
   return (
     <div className={`animate-pulse ${className}`}>
       {children}
+    </div>
+  )
+}
+
+// Error State Components
+interface ErrorStateProps {
+  title?: string
+  message?: string
+  onRetry?: () => void
+  showRetry?: boolean
+  isOffline?: boolean
+}
+
+export function ErrorState({
+  title = 'Something went wrong',
+  message = 'We encountered an error while loading this content.',
+  onRetry,
+  showRetry = true,
+  isOffline = false
+}: ErrorStateProps) {
+  return (
+    <div className="text-center py-12">
+      <div className="mx-auto h-12 w-12 text-gray-400">
+        {isOffline ? (
+          <WifiIcon className="h-12 w-12" />
+        ) : (
+          <ExclamationTriangleIcon className="h-12 w-12" />
+        )}
+      </div>
+      <h3 className="mt-4 text-sm font-medium text-gray-900">{title}</h3>
+      <p className="mt-2 text-sm text-gray-500">{message}</p>
+      {showRetry && onRetry && (
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+          >
+            <ArrowPathIcon className="h-4 w-4 mr-2" />
+            Try again
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface EmptyStateProps {
+  title?: string
+  message?: string
+  action?: {
+    label: string
+    onClick: () => void
+  }
+  icon?: React.ComponentType<{ className?: string }>
+}
+
+export function EmptyState({
+  title = 'No data available',
+  message = 'There is no data to display at the moment.',
+  action,
+  icon: Icon
+}: EmptyStateProps) {
+  return (
+    <div className="text-center py-12">
+      {Icon && (
+        <div className="mx-auto h-12 w-12 text-gray-400">
+          <Icon className="h-12 w-12" />
+        </div>
+      )}
+      <h3 className="mt-4 text-sm font-medium text-gray-900">{title}</h3>
+      <p className="mt-2 text-sm text-gray-500">{message}</p>
+      {action && (
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+          >
+            {action.label}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface FallbackNoticeProps {
+  message?: string
+  onRetryPrimary?: () => void
+}
+
+export function FallbackNotice({
+  message = 'Using offline data. Some information may not be up to date.',
+  onRetryPrimary
+}: FallbackNoticeProps) {
+  return (
+    <div className="rounded-md bg-yellow-50 p-4 mb-4">
+      <div className="flex">
+        <div className="flex-shrink-0">
+          <WifiIcon className="h-5 w-5 text-yellow-400" />
+        </div>
+        <div className="ml-3">
+          <p className="text-sm text-yellow-700">{message}</p>
+          {onRetryPrimary && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={onRetryPrimary}
+                className="text-sm font-medium text-yellow-700 hover:text-yellow-600"
+              >
+                Try to reconnect
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -13,7 +13,7 @@ import {
     TrashIcon,
     XCircleIcon,
 } from '@heroicons/react/24/outline'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { useState } from 'react'
 import { toast } from 'react-hot-toast'
 
@@ -428,7 +428,7 @@ export default function IntegrationsPage() {
                       onClick={() => handleTestConnection(integration.id)}
                       className="p-2 text-gray-400 hover:text-gray-500"
                       title="Test connection"
-                      disabled={testConnectionMutation.isPending}
+                      disabled={testConnectionMutation.isLoading}
                     >
                       <Cog6ToothIcon className="h-5 w-5" />
                     </button>
@@ -436,7 +436,7 @@ export default function IntegrationsPage() {
                       onClick={() => handleSyncIntegration(integration.id)}
                       className="p-2 text-gray-400 hover:text-gray-500"
                       title="Sync now"
-                      disabled={syncIntegrationMutation.isPending}
+                      disabled={syncIntegrationMutation.isLoading}
                     >
                       <ArrowPathIcon className="h-5 w-5" />
                     </button>
