@@ -16,7 +16,8 @@ import {
   XMarkIcon,
   ArrowRightOnRectangleIcon
 } from '@heroicons/react/24/outline'
-import { cn } from '@/lib/utils'
+// import { cn } from '@/lib/utils'
+const cn = (...classes: string[]) => classes.filter(Boolean).join(' ')
 import { useAuthStore } from '@/store/authStore'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { NotificationCenter } from '@/components/notifications/NotificationCenter'
