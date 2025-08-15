@@ -29,6 +29,7 @@ const navigation = [
   { name: 'Documents', href: '/dashboard/documents', icon: DocumentTextIcon },
   { name: 'Workflows', href: '/dashboard/workflows', icon: CogIcon },
   { name: 'Regulatory', href: '/dashboard/regulatory', icon: BellIcon },
+  { name: 'Security', href: '/dashboard/security', icon: ShieldCheckIcon },
 ]
 
 export default function DashboardLayout({
