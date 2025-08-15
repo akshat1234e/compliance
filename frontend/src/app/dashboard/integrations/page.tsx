@@ -15,7 +15,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useMutation, useQuery, useQueryClient } from 'react-query'
 import { useState } from 'react'
-import { toast } from 'react-hot-toast'
+// import { toast } from 'react-hot-toast'
 
 // Mock data for development
 const mockIntegrations = [
@@ -157,12 +157,11 @@ export default function IntegrationsPage() {
       return response.json()
     },
     onSuccess: () => {
-      toast.success('Connection test successful')
+      console.log('Connection test successful')
       queryClient.invalidateQueries({ queryKey: ['integrations'] })
     },
     onError: (error) => {
-      toast.error('Connection test failed')
-      console.error('Test connection error:', error)
+      console.error('Connection test failed:', error)
     },
   })
 
@@ -178,12 +177,11 @@ export default function IntegrationsPage() {
       return response.json()
     },
     onSuccess: () => {
-      toast.success('Sync initiated successfully')
+      console.log('Sync initiated successfully')
       queryClient.invalidateQueries({ queryKey: ['integrations'] })
     },
     onError: (error) => {
-      toast.error('Sync failed')
-      console.error('Sync error:', error)
+      console.error('Sync failed:', error)
     },
   })
 
@@ -567,7 +565,7 @@ export default function IntegrationsPage() {
                 </button>
                 <button
                   onClick={() => {
-                    toast.success('Integration added successfully')
+                    console.log('Integration added successfully')
                     setIsCreateModalOpen(false)
                   }}
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
