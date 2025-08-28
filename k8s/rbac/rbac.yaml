@@ -1,0 +1,306 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rbi-compliance-sa
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: rbac
+automountServiceAccountToken: true
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rbi-compliance-admin-sa
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: admin
+automountServiceAccountToken: true
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rbi-compliance-monitoring-sa
+  namespace: rbi-compliance-monitoring
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: monitoring
+automountServiceAccountToken: true
+
+---
+# Role for application pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: rbi-compliance
+  name: rbi-compliance-role
+  labels:
+    app: rbi-compliance
+    component: rbac
+rules:
+# ConfigMaps
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+# Secrets (limited access)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["rbi-compliance-secrets", "postgres-secret", "redis-secret"]
+# Services
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch"]
+# Pods (for health checks and debugging)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# Events (for logging)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+# ClusterRole for monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rbi-compliance-monitoring-role
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: monitoring
+rules:
+# Nodes
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "nodes/metrics"]
+  verbs: ["get", "list", "watch"]
+# Pods
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+# Services
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+# Deployments
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+# Ingress
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+# Custom metrics
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRole for admin operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rbi-compliance-admin-role
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: admin
+rules:
+# Full access to RBI compliance namespaces
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+  resourceNames: []
+# Limited cluster-wide access
+- apiGroups: [""]
+  resources: ["nodes", "persistentvolumes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding for application service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rbi-compliance-rolebinding
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: rbac
+subjects:
+- kind: ServiceAccount
+  name: rbi-compliance-sa
+  namespace: rbi-compliance
+roleRef:
+  kind: Role
+  name: rbi-compliance-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRoleBinding for monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rbi-compliance-monitoring-clusterrolebinding
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: monitoring
+subjects:
+- kind: ServiceAccount
+  name: rbi-compliance-monitoring-sa
+  namespace: rbi-compliance-monitoring
+- kind: ServiceAccount
+  name: prometheus
+  namespace: rbi-compliance-monitoring
+- kind: ServiceAccount
+  name: grafana
+  namespace: rbi-compliance-monitoring
+roleRef:
+  kind: ClusterRole
+  name: rbi-compliance-monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRoleBinding for admin
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rbi-compliance-admin-clusterrolebinding
+  labels:
+    app: rbi-compliance
+    component: rbac
+    role: admin
+subjects:
+- kind: ServiceAccount
+  name: rbi-compliance-admin-sa
+  namespace: rbi-compliance
+- kind: User
+  name: admin@rbi-compliance.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: rbi-compliance-admin-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Pod Security Policy
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: rbi-compliance-psp
+  labels:
+    app: rbi-compliance
+    component: security
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+      - min: 1
+        max: 65535
+  readOnlyRootFilesystem: false
+
+---
+# ClusterRole for PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rbi-compliance-psp-role
+  labels:
+    app: rbi-compliance
+    component: security
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - rbi-compliance-psp
+
+---
+# RoleBinding for PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rbi-compliance-psp-rolebinding
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: security
+roleRef:
+  kind: ClusterRole
+  name: rbi-compliance-psp-role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: rbi-compliance-sa
+  namespace: rbi-compliance
+- kind: ServiceAccount
+  name: rbi-compliance-admin-sa
+  namespace: rbi-compliance
+
+---
+# Network Policy for RBAC
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rbac-netpol
+  namespace: rbi-compliance
+  labels:
+    app: rbi-compliance
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 8443
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53

@@ -1,0 +1,577 @@
+# CDN Monitoring and Alerting Configuration
+# Comprehensive monitoring for CDN performance and cache efficiency
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cdn-dashboard
+  namespace: rbi-compliance
+  labels:
+    grafana_dashboard: "1"
+    component: cdn-monitoring
+data:
+  cdn-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "RBI Compliance - CDN Performance Dashboard",
+        "tags": ["cdn", "cloudfront", "nginx", "caching", "rbi-compliance"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "CDN Request Rate",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_http_requests_total{service=\"nginx-cdn\"}[5m])) by (status)",
+                "legendFormat": "{{status}}"
+              },
+              {
+                "expr": "sum(rate(cloudfront_requests_total[5m])) by (cache_status)",
+                "legendFormat": "CloudFront {{cache_status}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Cache Hit Ratio",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_http_requests_total{service=\"nginx-cdn\",cache_status=\"HIT\"}[5m])) / sum(rate(nginx_http_requests_total{service=\"nginx-cdn\"}[5m])) * 100",
+                "legendFormat": "NGINX Cache Hit %"
+              },
+              {
+                "expr": "sum(rate(cloudfront_requests_total{cache_status=\"Hit\"}[5m])) / sum(rate(cloudfront_requests_total[5m])) * 100",
+                "legendFormat": "CloudFront Hit %"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Response Time Distribution",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(nginx_http_request_duration_seconds_bucket{service=\"nginx-cdn\"}[5m])) by (le))",
+                "legendFormat": "50th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(nginx_http_request_duration_seconds_bucket{service=\"nginx-cdn\"}[5m])) by (le))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(nginx_http_request_duration_seconds_bucket{service=\"nginx-cdn\"}[5m])) by (le))",
+                "legendFormat": "99th percentile"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Bandwidth Usage",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_http_response_size_bytes{service=\"nginx-cdn\"}[5m])) * 8",
+                "legendFormat": "NGINX Outbound (bps)"
+              },
+              {
+                "expr": "sum(rate(cloudfront_bytes_downloaded[5m])) * 8",
+                "legendFormat": "CloudFront Outbound (bps)"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Cache Storage Usage",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "nginx_cache_size_bytes{service=\"nginx-cdn\"}",
+                "legendFormat": "{{cache_zone}} Cache Size"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Error Rate by Type",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum(rate(nginx_http_requests_total{service=\"nginx-cdn\",status=~\"4..\"}[5m])) by (status)",
+                "legendFormat": "4xx - {{status}}"
+              },
+              {
+                "expr": "sum(rate(nginx_http_requests_total{service=\"nginx-cdn\",status=~\"5..\"}[5m])) by (status)",
+                "legendFormat": "5xx - {{status}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          },
+          {
+            "id": 7,
+            "title": "Top Requested Assets",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "topk(10, sum(rate(nginx_http_requests_total{service=\"nginx-cdn\"}[5m])) by (request_uri))",
+                "legendFormat": "{{request_uri}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+          },
+          {
+            "id": 8,
+            "title": "Geographic Distribution",
+            "type": "worldmap",
+            "targets": [
+              {
+                "expr": "sum(rate(cloudfront_requests_total[5m])) by (edge_location)",
+                "legendFormat": "{{edge_location}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+          },
+          {
+            "id": 9,
+            "title": "Asset Type Performance",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "avg(nginx_http_request_duration_seconds{service=\"nginx-cdn\"}) by (content_type)",
+                "legendFormat": "{{content_type}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+---
+# CDN Performance Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cdn-performance-alerts
+  namespace: rbi-compliance
+  labels:
+    component: cdn-monitoring
+spec:
+  groups:
+  - name: cdn.performance
+    interval: 30s
+    rules:
+    # Cache hit ratio alerts
+    - alert: CDNLowCacheHitRatio
+      expr: |
+        (
+          sum(rate(nginx_http_requests_total{service="nginx-cdn",cache_status="HIT"}[5m])) /
+          sum(rate(nginx_http_requests_total{service="nginx-cdn"}[5m]))
+        ) * 100 < 70
+      for: 5m
+      labels:
+        severity: warning
+        component: cdn
+      annotations:
+        summary: "CDN cache hit ratio is low"
+        description: "CDN cache hit ratio is {{ $value }}%, below 70% threshold"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/cdn-low-cache-hit"
+    
+    # High response time alerts
+    - alert: CDNHighResponseTime
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(nginx_http_request_duration_seconds_bucket{service="nginx-cdn"}[5m])) by (le)
+        ) > 1
+      for: 3m
+      labels:
+        severity: warning
+        component: cdn
+      annotations:
+        summary: "CDN response time is high"
+        description: "CDN 95th percentile response time is {{ $value }}s"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/cdn-high-response-time"
+    
+    # High error rate alerts
+    - alert: CDNHighErrorRate
+      expr: |
+        (
+          sum(rate(nginx_http_requests_total{service="nginx-cdn",status=~"5.."}[5m])) /
+          sum(rate(nginx_http_requests_total{service="nginx-cdn"}[5m]))
+        ) * 100 > 5
+      for: 2m
+      labels:
+        severity: critical
+        component: cdn
+      annotations:
+        summary: "CDN error rate is high"
+        description: "CDN error rate is {{ $value }}%, above 5% threshold"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/cdn-high-error-rate"
+    
+    # Cache storage alerts
+    - alert: CDNCacheStorageFull
+      expr: |
+        (nginx_cache_size_bytes{service="nginx-cdn"} / nginx_cache_max_size_bytes{service="nginx-cdn"}) * 100 > 90
+      for: 5m
+      labels:
+        severity: warning
+        component: cdn
+      annotations:
+        summary: "CDN cache storage is nearly full"
+        description: "CDN cache {{ $labels.cache_zone }} is {{ $value }}% full"
+        runbook_url: "https://docs.rbi-compliance.com/runbooks/cdn-cache-full"
+    
+    # CloudFront specific alerts
+    - alert: CloudFrontHighOriginLatency
+      expr: cloudfront_origin_latency_seconds > 5
+      for: 5m
+      labels:
+        severity: warning
+        component: cloudfront
+      annotations:
+        summary: "CloudFront origin latency is high"
+        description: "CloudFront origin latency is {{ $value }}s for distribution {{ $labels.distribution_id }}"
+    
+    - alert: CloudFrontHighErrorRate
+      expr: |
+        (
+          sum(rate(cloudfront_requests_total{status=~"4..|5.."}[5m])) /
+          sum(rate(cloudfront_requests_total[5m]))
+        ) * 100 > 5
+      for: 3m
+      labels:
+        severity: critical
+        component: cloudfront
+      annotations:
+        summary: "CloudFront error rate is high"
+        description: "CloudFront error rate is {{ $value }}% for distribution {{ $labels.distribution_id }}"
+
+  - name: cdn.capacity
+    interval: 60s
+    rules:
+    # Bandwidth usage alerts
+    - alert: CDNHighBandwidthUsage
+      expr: |
+        sum(rate(nginx_http_response_size_bytes{service="nginx-cdn"}[5m])) * 8 > 1000000000
+      for: 10m
+      labels:
+        severity: warning
+        component: cdn
+      annotations:
+        summary: "CDN bandwidth usage is high"
+        description: "CDN bandwidth usage is {{ $value | humanize }}bps"
+    
+    # Request rate alerts
+    - alert: CDNHighRequestRate
+      expr: |
+        sum(rate(nginx_http_requests_total{service="nginx-cdn"}[5m])) > 10000
+      for: 5m
+      labels:
+        severity: warning
+        component: cdn
+      annotations:
+        summary: "CDN request rate is high"
+        description: "CDN request rate is {{ $value }} req/s"
+
+  - name: cdn.recording
+    interval: 30s
+    rules:
+    # Recording rules for dashboard efficiency
+    - record: cdn:cache_hit_ratio
+      expr: |
+        sum(rate(nginx_http_requests_total{service="nginx-cdn",cache_status="HIT"}[5m])) /
+        sum(rate(nginx_http_requests_total{service="nginx-cdn"}[5m])) * 100
+    
+    - record: cdn:response_time_p95
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(nginx_http_request_duration_seconds_bucket{service="nginx-cdn"}[5m])) by (le)
+        )
+    
+    - record: cdn:error_rate
+      expr: |
+        sum(rate(nginx_http_requests_total{service="nginx-cdn",status=~"5.."}[5m])) /
+        sum(rate(nginx_http_requests_total{service="nginx-cdn"}[5m])) * 100
+    
+    - record: cdn:bandwidth_usage
+      expr: |
+        sum(rate(nginx_http_response_size_bytes{service="nginx-cdn"}[5m])) * 8
+
+---
+# ServiceMonitor for NGINX CDN
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-cdn-metrics
+  namespace: rbi-compliance
+  labels:
+    component: cdn-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: nginx-cdn
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    honorLabels: true
+
+---
+# CDN Cache Warmer CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cdn-cache-warmer
+  namespace: rbi-compliance
+  labels:
+    component: cdn-maintenance
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cache-warmer
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting CDN cache warming..."
+              
+              # List of critical assets to warm
+              ASSETS=(
+                "/js/app.min.js"
+                "/css/app.min.css"
+                "/images/logo.png"
+                "/fonts/roboto.woff2"
+                "/manifest.json"
+              )
+              
+              CDN_BASE_URL="https://cdn.rbi-compliance.com"
+              
+              for asset in "${ASSETS[@]}"; do
+                echo "Warming cache for: $asset"
+                curl -s -o /dev/null -w "Status: %{http_code}, Time: %{time_total}s\n" \
+                  "$CDN_BASE_URL$asset"
+                sleep 1
+              done
+              
+              echo "Cache warming completed"
+          restartPolicy: OnFailure
+
+---
+# CDN Performance Test Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cdn-performance-test
+  namespace: rbi-compliance
+  labels:
+    component: cdn-testing
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: performance-test
+            image: loadimpact/k6:latest
+            command:
+            - k6
+            - run
+            - -
+            stdin: true
+            env:
+            - name: CDN_BASE_URL
+              value: "https://cdn.rbi-compliance.com"
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+          restartPolicy: OnFailure
+      backoffLimit: 3
+
+---
+# CDN Performance Test Script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cdn-performance-test-script
+  namespace: rbi-compliance
+  labels:
+    component: cdn-testing
+data:
+  performance-test.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Rate, Trend } from 'k6/metrics';
+    
+    // Custom metrics
+    const cacheHitRate = new Rate('cache_hit_rate');
+    const responseTime = new Trend('response_time');
+    
+    export let options = {
+      stages: [
+        { duration: '2m', target: 10 },   // Ramp up
+        { duration: '5m', target: 50 },   // Stay at 50 users
+        { duration: '2m', target: 0 },    // Ramp down
+      ],
+      thresholds: {
+        http_req_duration: ['p(95)<500'],  // 95% of requests under 500ms
+        cache_hit_rate: ['rate>0.8'],      // 80% cache hit rate
+        http_req_failed: ['rate<0.05'],    // Error rate under 5%
+      },
+    };
+    
+    const BASE_URL = __ENV.CDN_BASE_URL || 'https://cdn.rbi-compliance.com';
+    
+    const assets = [
+      '/js/app.min.js',
+      '/css/app.min.css',
+      '/images/logo.png',
+      '/images/banner.jpg',
+      '/fonts/roboto.woff2',
+      '/manifest.json'
+    ];
+    
+    export default function() {
+      // Test random asset
+      const asset = assets[Math.floor(Math.random() * assets.length)];
+      const url = `${BASE_URL}${asset}`;
+      
+      const response = http.get(url, {
+        headers: {
+          'Accept': '*/*',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'User-Agent': 'k6-performance-test/1.0'
+        }
+      });
+      
+      // Check response
+      const success = check(response, {
+        'status is 200': (r) => r.status === 200,
+        'response time < 1s': (r) => r.timings.duration < 1000,
+        'has cache header': (r) => r.headers['X-Cache-Status'] !== undefined,
+      });
+      
+      // Record cache hit
+      const cacheStatus = response.headers['X-Cache-Status'];
+      cacheHitRate.add(cacheStatus === 'HIT' || cacheStatus === 'Hit');
+      
+      // Record response time
+      responseTime.add(response.timings.duration);
+      
+      sleep(1);
+    }
+    
+    export function handleSummary(data) {
+      return {
+        'stdout': textSummary(data, { indent: ' ', enableColors: true }),
+        '/tmp/cdn-performance-report.json': JSON.stringify(data),
+      };
+    }
+
+---
+# CDN Cache Purge Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: cdn-cache-purge
+  namespace: rbi-compliance
+  labels:
+    app: cdn-cache-purge
+    component: cdn-management
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  selector:
+    app: cdn-cache-purge
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cdn-cache-purge
+  namespace: rbi-compliance
+  labels:
+    app: cdn-cache-purge
+    component: cdn-management
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cdn-cache-purge
+  template:
+    metadata:
+      labels:
+        app: cdn-cache-purge
+    spec:
+      containers:
+      - name: cache-purge
+        image: rbi-compliance/cdn-cache-purge:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: CLOUDFRONT_DISTRIBUTION_ID
+          valueFrom:
+            configMapKeyRef:
+              name: cdn-config
+              key: cloudfront-distribution-id
+        - name: NGINX_CDN_SERVICE
+          value: "nginx-cdn:8080"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# CDN Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cdn-config
+  namespace: rbi-compliance
+  labels:
+    component: cdn-configuration
+data:
+  cloudfront-distribution-id: "E1234567890ABC"
+  cdn-base-url: "https://cdn.rbi-compliance.com"
+  cache-control-max-age: "31536000"
+  cache-warming-schedule: "0 2 * * *"
+  performance-test-schedule: "0 */6 * * *"

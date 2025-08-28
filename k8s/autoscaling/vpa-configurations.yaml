@@ -1,0 +1,337 @@
+# Vertical Pod Autoscaler Configurations
+# Optimizes resource requests and limits for better efficiency
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: auth-service-vpa
+  namespace: rbi-compliance
+  labels:
+    app: auth-service
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service
+  
+  updatePolicy:
+    updateMode: "Auto"  # Automatically apply recommendations
+    minReplicas: 3      # Don't scale below minimum for availability
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: auth-service
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: compliance-service-vpa
+  namespace: rbi-compliance
+  labels:
+    app: compliance-service
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: compliance-service
+  
+  updatePolicy:
+    updateMode: "Auto"
+    minReplicas: 2
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: compliance-service
+      minAllowed:
+        cpu: 200m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 4000m
+        memory: 8Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+    
+    # Sidecar container for document processing
+    - containerName: document-processor
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 1000m
+        memory: 2Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: integration-gateway-vpa
+  namespace: rbi-compliance
+  labels:
+    app: integration-gateway
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: integration-gateway
+  
+  updatePolicy:
+    updateMode: "Auto"
+    minReplicas: 3
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: integration-gateway
+      minAllowed:
+        cpu: 200m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 3000m
+        memory: 6Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: api-gateway-vpa
+  namespace: rbi-compliance
+  labels:
+    app: api-gateway
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  
+  updatePolicy:
+    updateMode: "Auto"
+    minReplicas: 3
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: api-gateway
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+# VPA for database components
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: mongodb-vpa
+  namespace: rbi-compliance
+  labels:
+    app: mongodb
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: mongodb
+  
+  updatePolicy:
+    updateMode: "Initial"  # Only set initial resources, don't auto-update running pods
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: mongodb
+      minAllowed:
+        cpu: 500m
+        memory: 1Gi
+      maxAllowed:
+        cpu: 8000m
+        memory: 32Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: redis-vpa
+  namespace: rbi-compliance
+  labels:
+    app: redis
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: redis
+  
+  updatePolicy:
+    updateMode: "Initial"
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: redis
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 8Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+# VPA Recommender configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpa-recommender-config
+  namespace: rbi-compliance
+  labels:
+    component: vpa-recommender
+data:
+  recommender.yaml: |
+    # VPA Recommender configuration
+    recommender:
+      # CPU recommendation settings
+      cpu:
+        # Target CPU utilization for recommendations
+        targetUtilization: 0.7
+        # Lower bound for CPU recommendations
+        lowerBoundCpuPercentile: 0.5
+        # Upper bound for CPU recommendations  
+        upperBoundCpuPercentile: 0.95
+        # Margin of safety for CPU recommendations
+        safetyMarginFraction: 0.15
+      
+      # Memory recommendation settings
+      memory:
+        # Target memory utilization for recommendations
+        targetUtilization: 0.8
+        # Lower bound for memory recommendations
+        lowerBoundMemoryPercentile: 0.5
+        # Upper bound for memory recommendations
+        upperBoundMemoryPercentile: 0.95
+        # Margin of safety for memory recommendations
+        safetyMarginFraction: 0.15
+      
+      # Recommendation frequency
+      checkpointsGCPeriod: 10m
+      prometheusAddress: "http://prometheus:9090"
+      
+      # Recommendation quality settings
+      histogramBucketSizeGrowth: 0.05
+      histogramMaxAge: 8d
+      memoryAggregationInterval: 1m
+      memoryAggregationIntervalCount: 8
+      memoryHistogramDecayHalfLife: 24h
+
+---
+# VPA Admission Controller configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpa-admission-controller-config
+  namespace: rbi-compliance
+  labels:
+    component: vpa-admission-controller
+data:
+  admission-controller.yaml: |
+    # VPA Admission Controller configuration
+    admissionController:
+      # Resource update policies
+      resourceUpdatePolicy:
+        # Update requests and limits together
+        updateMode: "RequestsAndLimits"
+        
+        # Minimum resource changes to trigger update
+        minChangePercent: 10
+        
+        # Maximum resource changes in single update
+        maxChangePercent: 200
+      
+      # Webhook configuration
+      webhook:
+        # Timeout for webhook calls
+        timeoutSeconds: 10
+        
+        # Failure policy if webhook is unavailable
+        failurePolicy: "Ignore"
+        
+        # Admission review versions
+        admissionReviewVersions: ["v1", "v1beta1"]
+
+---
+# ServiceMonitor for VPA metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vpa-metrics
+  namespace: rbi-compliance
+  labels:
+    component: vpa-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: vpa-recommender
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+# PrometheusRule for VPA alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vpa-alerts
+  namespace: rbi-compliance
+  labels:
+    component: vpa-monitoring
+spec:
+  groups:
+  - name: vpa.alerts
+    rules:
+    - alert: VPARecommenderDown
+      expr: up{job="vpa-recommender"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "VPA Recommender is down"
+        description: "VPA Recommender has been down for more than 5 minutes"
+    
+    - alert: VPAAdmissionControllerDown
+      expr: up{job="vpa-admission-controller"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "VPA Admission Controller is down"
+        description: "VPA Admission Controller has been down for more than 5 minutes"
+    
+    - alert: VPARecommendationStale
+      expr: |
+        time() - vpa_last_recommendation_time > 3600
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "VPA recommendations are stale"
+        description: "VPA has not generated recommendations for {{ $labels.vpa }} in over 1 hour"

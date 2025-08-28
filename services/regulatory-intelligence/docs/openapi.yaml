@@ -1,0 +1,753 @@
+openapi: 3.0.3
+info:
+  title: Regulatory Intelligence Service API
+  description: |
+    Comprehensive REST API for regulatory compliance management, including circular analysis, 
+    impact assessment, timeline mapping, and notification services.
+  version: 1.0.0
+  contact:
+    name: Compliance Platform Support
+    email: support@compliance-platform.com
+    url: https://compliance-platform.com/support
+  license:
+    name: Proprietary
+    url: https://compliance-platform.com/license
+
+servers:
+  - url: https://api.compliance.platform/regulatory-intelligence/api/v1
+    description: Production server
+  - url: https://staging-api.compliance.platform/regulatory-intelligence/api/v1
+    description: Staging server
+  - url: http://localhost:3001/api/v1
+    description: Development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Health Endpoints
+  /health:
+    get:
+      tags: [Health]
+      summary: Basic health check
+      description: Returns basic service health status
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /health/detailed:
+    get:
+      tags: [Health]
+      summary: Detailed health status
+      description: Returns detailed health status including dependencies
+      responses:
+        '200':
+          description: Detailed health information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthResponse'
+
+  # Regulations Endpoints
+  /regulations:
+    get:
+      tags: [Regulations]
+      summary: List regulations
+      description: Get paginated list of regulations with filtering options
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/SearchParam'
+        - $ref: '#/components/parameters/CategoryParam'
+        - $ref: '#/components/parameters/StatusParam'
+      responses:
+        '200':
+          description: List of regulations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegulationsListResponse'
+
+  /regulations/{id}:
+    get:
+      tags: [Regulations]
+      summary: Get regulation details
+      description: Get detailed information about a specific regulation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Regulation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegulationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /regulations/search:
+    post:
+      tags: [Regulations]
+      summary: Search regulations
+      description: Full-text search across regulations with advanced filtering
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  # Impact Analysis Endpoints
+  /impact/analyze:
+    post:
+      tags: [Impact Analysis]
+      summary: Analyze regulatory impact
+      description: Perform AI-powered impact analysis for a regulatory circular
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImpactAnalysisRequest'
+      responses:
+        '200':
+          description: Impact analysis results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactAnalysisResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /impact/{assessmentId}:
+    get:
+      tags: [Impact Analysis]
+      summary: Get impact assessment
+      description: Retrieve impact assessment results by ID
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Impact assessment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImpactAssessmentResponse'
+
+  # Scraper Endpoints
+  /scraper/scrape:
+    post:
+      tags: [Scraper]
+      summary: Trigger manual scraping
+      description: Manually trigger RBI circular scraping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScrapingRequest'
+      responses:
+        '200':
+          description: Scraping initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapingResponse'
+
+  /scraper/status:
+    get:
+      tags: [Scraper]
+      summary: Get scraping status
+      description: Get current scraping status and statistics
+      responses:
+        '200':
+          description: Scraping status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapingStatusResponse'
+
+  # Parser Endpoints
+  /parser/parse:
+    post:
+      tags: [Parser]
+      summary: Parse circular content
+      description: Parse regulatory circular using NLP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseRequest'
+      responses:
+        '200':
+          description: Parsing results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseResponse'
+
+  # Notification Endpoints
+  /notifications/send:
+    post:
+      tags: [Notifications]
+      summary: Send notification
+      description: Send custom notification to recipients
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRequest'
+      responses:
+        '200':
+          description: Notification sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+
+  # Timeline Endpoints
+  /timeline/generate:
+    post:
+      tags: [Timeline]
+      summary: Generate timeline
+      description: Generate implementation timeline for regulatory circular
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimelineGenerationRequest'
+      responses:
+        '200':
+          description: Timeline generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Page number
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    LimitParam:
+      name: limit
+      in: query
+      description: Items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    SearchParam:
+      name: search
+      in: query
+      description: Search query
+      schema:
+        type: string
+
+    CategoryParam:
+      name: category
+      in: query
+      description: Filter by category
+      schema:
+        type: string
+
+    StatusParam:
+      name: status
+      in: query
+      description: Filter by status
+      schema:
+        type: string
+
+  schemas:
+    # Base Response Schemas
+    BaseResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        metadata:
+          $ref: '#/components/schemas/ResponseMetadata'
+      required:
+        - success
+
+    ResponseMetadata:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        processingTime:
+          type: string
+          example: "150ms"
+
+    PaginationInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    # Health Schemas
+    HealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, unhealthy]
+                uptime:
+                  type: string
+                version:
+                  type: string
+
+    DetailedHealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, degraded, unhealthy]
+                services:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                      responseTime:
+                        type: string
+                      lastCheck:
+                        type: string
+                        format: date-time
+
+    # Regulation Schemas
+    Regulation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        circularNumber:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        impactLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        publishedDate:
+          type: string
+          format: date
+        effectiveDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, superseded, withdrawn]
+
+    RegulationsListResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Regulation'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    RegulationResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/Regulation'
+
+    # Search Schemas
+    SearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        filters:
+          type: object
+          properties:
+            category:
+              type: string
+            impactLevel:
+              type: string
+            dateRange:
+              type: object
+              properties:
+                start:
+                  type: string
+                  format: date
+                end:
+                  type: string
+                  format: date
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      required:
+        - query
+
+    SearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                results:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Regulation'
+                totalResults:
+                  type: integer
+                searchTime:
+                  type: string
+
+    # Impact Analysis Schemas
+    ImpactAnalysisRequest:
+      type: object
+      properties:
+        circularId:
+          type: string
+        organizationId:
+          type: string
+          format: uuid
+        organizationType:
+          type: string
+          enum: [bank, nbfc, cooperative_bank, payment_bank, small_finance_bank]
+        organizationProfile:
+          type: object
+          properties:
+            size:
+              type: string
+              enum: [small, medium, large, very_large]
+            complianceMaturity:
+              type: integer
+              minimum: 1
+              maximum: 10
+        analysisType:
+          type: string
+          enum: [basic, detailed, comprehensive]
+          default: basic
+      required:
+        - circularId
+        - organizationId
+        - organizationType
+
+    ImpactAnalysisResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id:
+                  type: string
+                overallImpact:
+                  type: object
+                  properties:
+                    overall:
+                      type: number
+                    level:
+                      type: string
+                      enum: [minimal, low, medium, high, critical]
+                impactAreas:
+                  type: array
+                  items:
+                    type: object
+
+    # Error Schemas
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+        metadata:
+          $ref: '#/components/schemas/ResponseMetadata'
+
+    # Additional schemas for other endpoints would be defined here...
+    ScrapingRequest:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        maxPages:
+          type: integer
+          minimum: 1
+          maximum: 20
+
+    ScrapingResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                status:
+                  type: string
+                  enum: [started, running, completed, failed]
+
+    ScrapingStatusResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                statistics:
+                  type: object
+
+    ParseRequest:
+      type: object
+      properties:
+        circularId:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+      required:
+        - circularId
+        - content
+
+    ParseResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                circularId:
+                  type: string
+                confidence:
+                  type: number
+                content:
+                  type: object
+
+    NotificationRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        recipients:
+          type: array
+          items:
+            type: object
+        channels:
+          type: array
+          items:
+            type: string
+      required:
+        - type
+        - title
+        - message
+        - recipients
+
+    NotificationResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id:
+                  type: string
+                status:
+                  type: string
+
+    TimelineGenerationRequest:
+      type: object
+      properties:
+        circularId:
+          type: string
+        organizationType:
+          type: string
+        organizationSize:
+          type: string
+        complianceMaturity:
+          type: integer
+      required:
+        - circularId
+        - organizationType
+
+    TimelineResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id:
+                  type: string
+                timeline:
+                  type: array
+                  items:
+                    type: object
+
+    ImpactAssessmentResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Health
+    description: Service health monitoring endpoints
+  - name: Regulations
+    description: Regulatory data management
+  - name: Impact Analysis
+    description: AI-powered impact assessment
+  - name: Scraper
+    description: Web scraping operations
+  - name: Parser
+    description: NLP content parsing
+  - name: Notifications
+    description: Notification management
+  - name: Timeline
+    description: Timeline mapping and scheduling

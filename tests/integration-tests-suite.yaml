@@ -1,0 +1,523 @@
+# Comprehensive Integration Test Suite
+# End-to-end API testing with database interactions
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: integration-test-config
+  namespace: rbi-compliance
+  labels:
+    component: integration-testing
+data:
+  test-environment.yaml: |
+    # Integration Test Environment Configuration
+    spring:
+      profiles:
+        active: integration-test
+      
+      datasource:
+        url: jdbc:postgresql://postgresql-test:5432/rbi_compliance_test
+        username: test_user
+        password: test_password
+        driver-class-name: org.postgresql.Driver
+        
+      jpa:
+        hibernate:
+          ddl-auto: create-drop
+        show-sql: false
+        properties:
+          hibernate:
+            format_sql: true
+            
+      redis:
+        host: redis-test
+        port: 6379
+        database: 0
+        
+      elasticsearch:
+        uris: http://elasticsearch-test:9200
+        
+      security:
+        jwt:
+          secret: integration-test-secret-key
+          expiration: 3600000
+          
+      kafka:
+        bootstrap-servers: kafka-test:9092
+        consumer:
+          group-id: integration-test-group
+          
+      logging:
+        level:
+          com.rbi.compliance: INFO
+          org.springframework.web: DEBUG
+          
+    test:
+      containers:
+        enabled: true
+      database:
+        cleanup: true
+      api:
+        base-url: http://api-gateway:8080
+        timeout: 30000
+
+  integration-test-data.sql: |
+    -- Test data for integration tests
+    
+    -- Users
+    INSERT INTO users (id, username, email, password, role, enabled, created_at) VALUES
+    (1, 'testuser1', 'test1@example.com', '$2a$10$encrypted_password', 'USER', true, NOW()),
+    (2, 'testadmin', 'admin@example.com', '$2a$10$encrypted_password', 'ADMIN', true, NOW()),
+    (3, 'testmanager', 'manager@example.com', '$2a$10$encrypted_password', 'MANAGER', true, NOW());
+    
+    -- Compliance Rules
+    INSERT INTO compliance_rules (id, rule_id, rule_name, rule_type, description, rule_expression, severity, enabled, created_at) VALUES
+    (1, 'RULE_001', 'Transaction Limit', 'TRANSACTION_LIMIT', 'Max transaction limit', 'amount <= 1000000', 'HIGH', true, NOW()),
+    (2, 'RULE_002', 'Daily Count', 'TRANSACTION_COUNT', 'Daily transaction count', 'count <= 100', 'MEDIUM', true, NOW());
+    
+    -- Documents
+    INSERT INTO documents (id, document_id, title, document_type, file_path, status, uploaded_by, created_at) VALUES
+    (1, 'DOC_001', 'Test Document 1', 'PDF', '/test/doc1.pdf', 'PROCESSED', 'testuser1', NOW()),
+    (2, 'DOC_002', 'Test Document 2', 'DOCX', '/test/doc2.docx', 'PENDING', 'testuser1', NOW());
+    
+    -- Workflows
+    INSERT INTO workflows (id, workflow_id, workflow_name, workflow_type, status, created_by, created_at) VALUES
+    (1, 'WF_001', 'Test Workflow 1', 'APPROVAL', 'ACTIVE', 'testadmin', NOW()),
+    (2, 'WF_002', 'Test Workflow 2', 'REVIEW', 'DRAFT', 'testmanager', NOW());
+
+---
+# Integration Test Execution Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: integration-tests-execution
+  namespace: rbi-compliance
+  labels:
+    component: integration-testing
+spec:
+  template:
+    spec:
+      initContainers:
+      # Wait for test database to be ready
+      - name: wait-for-db
+        image: postgres:15
+        command:
+        - /bin/bash
+        - -c
+        - |
+          until pg_isready -h postgresql-test -p 5432; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL is ready!"
+      
+      # Wait for Redis to be ready
+      - name: wait-for-redis
+        image: redis:7-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          until redis-cli -h redis-test ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+      
+      # Wait for Elasticsearch to be ready
+      - name: wait-for-elasticsearch
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          until curl -f http://elasticsearch-test:9200/_cluster/health; do
+            echo "Waiting for Elasticsearch..."
+            sleep 5
+          done
+          echo "Elasticsearch is ready!"
+      
+      containers:
+      - name: integration-tests
+        image: maven:3.9-openjdk-17
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting integration test execution..."
+          
+          # Test results directory
+          mkdir -p /test-results/integration
+          
+          # Services to test
+          SERVICES=(
+            "auth-service"
+            "compliance-service"
+            "document-service"
+            "workflow-service"
+            "integration-gateway"
+            "api-gateway"
+          )
+          
+          # Test execution summary
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+          
+          for service in "${SERVICES[@]}"; do
+            echo "========================================="
+            echo "Running integration tests for $service"
+            echo "========================================="
+            
+            cd /workspace/services/$service
+            
+            # Run integration tests
+            mvn clean verify \
+              -Dspring.profiles.active=integration-test \
+              -Dtest.database.url=jdbc:postgresql://postgresql-test:5432/rbi_compliance_test \
+              -Dtest.redis.host=redis-test \
+              -Dtest.elasticsearch.host=elasticsearch-test \
+              -Dmaven.test.failure.ignore=true \
+              -Dfailsafe.rerunFailingTestsCount=2
+            
+            # Extract test results
+            if [ -f target/failsafe-reports/TEST-*.xml ]; then
+              SERVICE_TESTS=$(grep -o 'tests="[0-9]*"' target/failsafe-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              SERVICE_FAILURES=$(grep -o 'failures="[0-9]*"' target/failsafe-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              SERVICE_ERRORS=$(grep -o 'errors="[0-9]*"' target/failsafe-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              
+              SERVICE_PASSED=$((SERVICE_TESTS - SERVICE_FAILURES - SERVICE_ERRORS))
+              SERVICE_FAILED=$((SERVICE_FAILURES + SERVICE_ERRORS))
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + SERVICE_TESTS))
+              PASSED_TESTS=$((PASSED_TESTS + SERVICE_PASSED))
+              FAILED_TESTS=$((FAILED_TESTS + SERVICE_FAILED))
+              
+              echo "$service: $SERVICE_PASSED passed, $SERVICE_FAILED failed"
+            fi
+            
+            # Copy test reports
+            cp -r target/failsafe-reports /test-results/integration/${service}-failsafe-reports || true
+            cp -r target/site /test-results/integration/${service}-site || true
+            
+            cd /workspace
+          done
+          
+          # Run API endpoint tests
+          echo "========================================="
+          echo "Running API endpoint integration tests"
+          echo "========================================="
+          
+          cd /workspace/tests/integration
+          
+          # Install Newman (Postman CLI)
+          npm install -g newman
+          
+          # Run Postman collections
+          COLLECTIONS=(
+            "auth-api-tests.json"
+            "compliance-api-tests.json"
+            "document-api-tests.json"
+            "workflow-api-tests.json"
+          )
+          
+          for collection in "${COLLECTIONS[@]}"; do
+            echo "Running $collection..."
+            newman run "$collection" \
+              --environment integration-environment.json \
+              --reporters cli,json \
+              --reporter-json-export "/test-results/integration/${collection%.json}-results.json" \
+              --timeout-request 30000 \
+              --delay-request 1000 || true
+          done
+          
+          # Run REST Assured tests
+          echo "Running REST Assured integration tests..."
+          mvn clean test \
+            -Dtest="**/*IntegrationTest" \
+            -Dspring.profiles.active=integration-test \
+            -Dapi.base.url=http://api-gateway:8080
+          
+          # Generate summary report
+          echo "========================================="
+          echo "INTEGRATION TEST EXECUTION SUMMARY"
+          echo "========================================="
+          echo "Total Tests: $TOTAL_TESTS"
+          echo "Passed: $PASSED_TESTS"
+          echo "Failed: $FAILED_TESTS"
+          echo "Success Rate: $(( (PASSED_TESTS * 100) / TOTAL_TESTS ))%"
+          
+          # Generate JSON report
+          cat > /test-results/integration/integration-test-summary.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "test_type": "integration",
+            "summary": {
+              "total_tests": $TOTAL_TESTS,
+              "passed_tests": $PASSED_TESTS,
+              "failed_tests": $FAILED_TESTS,
+              "success_rate": $(( (PASSED_TESTS * 100) / TOTAL_TESTS ))
+            },
+            "services_tested": [
+          EOF
+          
+          for i in "${!SERVICES[@]}"; do
+            echo "      \"${SERVICES[i]}\"" >> /test-results/integration/integration-test-summary.json
+            if [ $i -lt $((${#SERVICES[@]} - 1)) ]; then
+              echo "," >> /test-results/integration/integration-test-summary.json
+            fi
+          done
+          
+          echo "    ]" >> /test-results/integration/integration-test-summary.json
+          echo "  }" >> /test-results/integration/integration-test-summary.json
+          
+          # Upload results to S3
+          if [ -n "${AWS_S3_BUCKET:-}" ]; then
+            aws s3 sync /test-results s3://$AWS_S3_BUCKET/test-results/integration/$(date +%Y%m%d_%H%M%S)/
+          fi
+          
+          # Send notification
+          if [ -n "${WEBHOOK_URL:-}" ]; then
+            if [ $FAILED_TESTS -eq 0 ]; then
+              curl -X POST "$WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"text\":\"✅ Integration tests passed: $PASSED_TESTS/$TOTAL_TESTS tests successful\"}"
+            else
+              curl -X POST "$WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"text\":\"❌ Integration tests failed: $FAILED_TESTS/$TOTAL_TESTS tests failed\"}"
+            fi
+          fi
+          
+          # Exit with error if tests failed
+          if [ $FAILED_TESTS -gt 0 ]; then
+            echo "Integration tests failed!"
+            exit 1
+          fi
+          
+          echo "All integration tests passed successfully!"
+        
+        env:
+        - name: MAVEN_OPTS
+          value: "-Xmx3g -XX:MaxMetaspaceSize=512m"
+        - name: AWS_S3_BUCKET
+          value: "rbi-compliance-test-results"
+        - name: WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: test-notifications
+              key: webhook-url
+              optional: true
+        
+        resources:
+          requests:
+            cpu: 2000m
+            memory: 4Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+        - name: maven-cache
+          mountPath: /root/.m2
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: maven-cache
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Test Database for Integration Tests
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql-test
+  namespace: rbi-compliance
+  labels:
+    app: postgresql-test
+    component: integration-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql-test
+  template:
+    metadata:
+      labels:
+        app: postgresql-test
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:15
+        env:
+        - name: POSTGRES_DB
+          value: "rbi_compliance_test"
+        - name: POSTGRES_USER
+          value: "test_user"
+        - name: POSTGRES_PASSWORD
+          value: "test_password"
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+        
+        ports:
+        - containerPort: 5432
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+      
+      volumes:
+      - name: postgres-data
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: init-scripts
+        configMap:
+          name: integration-test-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-test
+  namespace: rbi-compliance
+  labels:
+    app: postgresql-test
+spec:
+  selector:
+    app: postgresql-test
+  ports:
+  - port: 5432
+    targetPort: 5432
+
+---
+# Test Redis for Integration Tests
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-test
+  namespace: rbi-compliance
+  labels:
+    app: redis-test
+    component: integration-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-test
+  template:
+    metadata:
+      labels:
+        app: redis-test
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-test
+  namespace: rbi-compliance
+  labels:
+    app: redis-test
+spec:
+  selector:
+    app: redis-test
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+# Test Elasticsearch for Integration Tests
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch-test
+  namespace: rbi-compliance
+  labels:
+    app: elasticsearch-test
+    component: integration-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch-test
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-test
+    spec:
+      containers:
+      - name: elasticsearch
+        image: elasticsearch:8.8.0
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: xpack.security.enabled
+          value: "false"
+        - name: ES_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        
+        ports:
+        - containerPort: 9200
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-test
+  namespace: rbi-compliance
+  labels:
+    app: elasticsearch-test
+spec:
+  selector:
+    app: elasticsearch-test
+  ports:
+  - port: 9200
+    targetPort: 9200

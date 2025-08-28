@@ -1,0 +1,167 @@
+# RBI Compliance Platform - Azure Infrastructure Variables
+# Copy this file to terraform.tfvars and update the values
+
+# Environment Configuration
+environment = "prod"  # Options: dev, staging, prod
+azure_location = "Central India"  # India region for compliance
+
+# Project Configuration
+project_name = "rbi-compliance"
+
+# Virtual Network Configuration
+vnet_cidr = "10.0.0.0/16"
+aks_subnet_cidr = "10.0.1.0/24"
+database_subnet_cidr = "10.0.2.0/24"
+private_endpoint_subnet_cidr = "10.0.3.0/24"
+
+# AKS Configuration
+kubernetes_version = "1.28.3"
+node_vm_size = "Standard_D4s_v3"
+spot_vm_size = "Standard_D4s_v3"
+
+# Node Pool Configuration (will be overridden by environment_configs)
+node_count = 5
+node_min_count = 3
+node_max_count = 20
+spot_node_count = 2
+spot_max_count = 10
+spot_max_price = 0.5
+
+# Kubernetes Service Configuration
+service_cidr = "10.1.0.0/16"
+dns_service_ip = "10.1.0.10"
+
+# Database Configuration
+postgres_sku_name = "GP_Standard_D4s_v3"
+postgres_storage_mb = 131072  # 128 GB
+database_name = "rbi_compliance"
+database_username = "rbi_user"
+database_password = "CHANGE_ME_TO_SECURE_PASSWORD"  # Use a strong password
+
+# Redis Configuration
+redis_sku_name = "Premium"
+redis_family = "P"
+redis_capacity = 1
+redis_maxmemory_reserved = 10
+redis_maxmemory_delta = 2
+
+# Storage Configuration
+storage_account_tier = "Standard"
+storage_replication_type = "GRS"
+
+# Monitoring Configuration
+log_retention_days = 30
+enable_container_insights = true
+
+# Security Configuration
+enable_azure_policy = true
+enable_key_vault_secrets_provider = true
+enable_workload_identity = true
+enable_azure_defender = true
+
+# Network Security Configuration
+enable_private_cluster = false
+authorized_ip_ranges = []  # Add your IP ranges for API server access
+
+# Backup Configuration
+backup_retention_days = 35
+enable_geo_redundant_backup = true
+enable_cross_region_backup = true
+backup_region = "South India"
+
+# Cost Optimization
+enable_spot_node_pool = true
+enable_auto_scaling = true
+
+# Application Gateway Configuration
+enable_application_gateway = true
+app_gateway_sku = "Standard_v2"
+
+# DNS Configuration
+dns_zone_name = "rbi-compliance.com"
+create_dns_zone = true
+
+# Certificate Configuration
+enable_cert_manager = true
+
+# Compliance and Governance
+enable_diagnostic_settings = true
+
+# Additional Tags
+additional_tags = {
+  "CostCenter" = "IT-Infrastructure"
+  "Owner" = "DevOps-Team"
+  "Compliance" = "RBI"
+  "DataClassification" = "Confidential"
+}
+
+# Environment-specific configurations are defined in variables.tf
+# The following will be automatically applied based on the environment:
+#
+# Development (dev):
+# - node_count = 2, node_min_count = 1, node_max_count = 5
+# - node_vm_size = "Standard_D2s_v3"
+# - postgres_sku_name = "B_Standard_B2s"
+# - postgres_storage_mb = 32768 (32 GB)
+# - redis_sku_name = "Basic", redis_capacity = 0
+# - storage_replication_type = "LRS"
+# - backup_retention_days = 7
+# - enable_geo_redundant_backup = false
+# - log_retention_days = 7
+#
+# Staging (staging):
+# - node_count = 3, node_min_count = 2, node_max_count = 8
+# - node_vm_size = "Standard_D2s_v3"
+# - postgres_sku_name = "GP_Standard_D2s_v3"
+# - postgres_storage_mb = 65536 (64 GB)
+# - redis_sku_name = "Standard", redis_capacity = 1
+# - storage_replication_type = "GRS"
+# - backup_retention_days = 14
+# - enable_geo_redundant_backup = true
+# - log_retention_days = 14
+#
+# Production (prod):
+# - node_count = 5, node_min_count = 3, node_max_count = 20
+# - node_vm_size = "Standard_D4s_v3"
+# - postgres_sku_name = "GP_Standard_D4s_v3"
+# - postgres_storage_mb = 131072 (128 GB)
+# - redis_sku_name = "Premium", redis_capacity = 1
+# - storage_replication_type = "GRS"
+# - backup_retention_days = 35
+# - enable_geo_redundant_backup = true
+# - log_retention_days = 30
+
+# Security Notes:
+# 1. Change all default passwords
+# 2. Use Azure Key Vault for sensitive data in production
+# 3. Enable Azure AD authentication for all services
+# 4. Regularly rotate credentials
+# 5. Monitor Azure Security Center recommendations
+
+# Cost Optimization Notes:
+# 1. Use spot VMs for non-critical workloads
+# 2. Enable auto-scaling to optimize costs
+# 3. Set up cost alerts and budgets
+# 4. Use Reserved Instances for predictable workloads
+# 5. Implement storage lifecycle policies
+
+# Compliance Notes:
+# 1. Enable all security features for production
+# 2. Configure proper backup and retention policies
+# 3. Ensure data residency requirements are met (India regions)
+# 4. Enable comprehensive logging and monitoring
+# 5. Regular security assessments and compliance audits
+
+# Azure-specific Features:
+# 1. Azure Policy for governance and compliance
+# 2. Azure Security Center for security monitoring
+# 3. Azure Monitor for comprehensive monitoring
+# 4. Azure Key Vault for secrets management
+# 5. Azure AD integration for identity management
+
+# Network Security:
+# 1. Network Security Groups for traffic filtering
+# 2. Private endpoints for secure connectivity
+# 3. Azure Firewall for advanced protection
+# 4. DDoS protection for public endpoints
+# 5. VNet peering for secure communication

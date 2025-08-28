@@ -1,0 +1,544 @@
+# Istio Service Mesh Configuration
+# Advanced traffic management and load balancing
+
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: rbi-compliance-istio
+  namespace: istio-system
+spec:
+  values:
+    global:
+      meshID: rbi-compliance-mesh
+      multiCluster:
+        clusterName: rbi-compliance-cluster
+      network: rbi-compliance-network
+    pilot:
+      env:
+        EXTERNAL_ISTIOD: false
+        PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION: true
+        PILOT_ENABLE_CROSS_CLUSTER_WORKLOAD_ENTRY: true
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2048Mi
+          limits:
+            cpu: 1000m
+            memory: 4096Mi
+        hpaSpec:
+          minReplicas: 2
+          maxReplicas: 5
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 80
+    ingressGateways:
+    - name: istio-ingressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2048Mi
+        hpaSpec:
+          minReplicas: 3
+          maxReplicas: 10
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+        service:
+          type: LoadBalancer
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+            service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    egressGateways:
+    - name: istio-egressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1024Mi
+
+---
+# Gateway configuration for external traffic
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: rbi-compliance-gateway
+  namespace: rbi-compliance
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - api.rbi-compliance.com
+    - app.rbi-compliance.com
+    - admin.rbi-compliance.com
+    tls:
+      httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: rbi-compliance-tls
+    hosts:
+    - api.rbi-compliance.com
+    - app.rbi-compliance.com
+    - admin.rbi-compliance.com
+
+---
+# Virtual Service for intelligent traffic routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: rbi-compliance-vs
+  namespace: rbi-compliance
+spec:
+  hosts:
+  - api.rbi-compliance.com
+  - app.rbi-compliance.com
+  - admin.rbi-compliance.com
+  gateways:
+  - rbi-compliance-gateway
+  http:
+  # API routing with load balancing
+  - match:
+    - uri:
+        prefix: /api/auth
+    route:
+    - destination:
+        host: auth-service
+        port:
+          number: 8080
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    timeout: 30s
+  
+  - match:
+    - uri:
+        prefix: /api/compliance
+    route:
+    - destination:
+        host: compliance-service
+        port:
+          number: 8080
+    retries:
+      attempts: 3
+      perTryTimeout: 15s
+    timeout: 45s
+  
+  - match:
+    - uri:
+        prefix: /api/integration
+    route:
+    - destination:
+        host: integration-gateway
+        port:
+          number: 8080
+    retries:
+      attempts: 5
+      perTryTimeout: 20s
+    timeout: 60s
+  
+  # Canary deployment routing
+  - match:
+    - uri:
+        prefix: /api/
+    headers:
+      x-canary:
+        exact: "true"
+    route:
+    - destination:
+        host: api-gateway
+        subset: canary
+        port:
+          number: 8080
+      weight: 100
+  
+  # Default API routing with traffic splitting
+  - match:
+    - uri:
+        prefix: /api/
+    route:
+    - destination:
+        host: api-gateway
+        subset: stable
+        port:
+          number: 8080
+      weight: 90
+    - destination:
+        host: api-gateway
+        subset: canary
+        port:
+          number: 8080
+      weight: 10
+  
+  # Frontend application routing
+  - match:
+    - uri:
+        prefix: /
+    headers:
+      host:
+        exact: app.rbi-compliance.com
+    route:
+    - destination:
+        host: frontend-app
+        port:
+          number: 3000
+  
+  # Admin interface routing
+  - match:
+    - uri:
+        prefix: /
+    headers:
+      host:
+        exact: admin.rbi-compliance.com
+    route:
+    - destination:
+        host: admin-interface
+        port:
+          number: 3001
+
+---
+# Destination Rules for load balancing strategies
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: auth-service-dr
+  namespace: rbi-compliance
+spec:
+  host: auth-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+        keepAlive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+        consecutiveGatewayErrors: 5
+        interval: 30s
+        baseEjectionTime: 30s
+        maxEjectionPercent: 50
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: compliance-service-dr
+  namespace: rbi-compliance
+spec:
+  host: compliance-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 30
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 5
+        maxRetries: 3
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      consecutive5xxErrors: 5
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 30
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: integration-gateway-dr
+  namespace: rbi-compliance
+spec:
+  host: integration-gateway
+  trafficPolicy:
+    loadBalancer:
+      simple: RANDOM
+    connectionPool:
+      tcp:
+        maxConnections: 200
+        connectTimeout: 10s
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 200
+        maxRequestsPerConnection: 20
+        maxRetries: 5
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: api-gateway-dr
+  namespace: rbi-compliance
+spec:
+  host: api-gateway
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: "x-user-id"
+    connectionPool:
+      tcp:
+        maxConnections: 300
+        connectTimeout: 10s
+      http:
+        http1MaxPendingRequests: 150
+        http2MaxRequests: 300
+        maxRequestsPerConnection: 50
+        maxRetries: 3
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 30
+  subsets:
+  - name: stable
+    labels:
+      version: stable
+    trafficPolicy:
+      loadBalancer:
+        simple: LEAST_CONN
+  - name: canary
+    labels:
+      version: canary
+    trafficPolicy:
+      loadBalancer:
+        simple: ROUND_ROBIN
+
+---
+# Service Entry for external banking APIs
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-banking-apis
+  namespace: rbi-compliance
+spec:
+  hosts:
+  - banking-api.example.com
+  - rbi-api.gov.in
+  - cibil-api.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  location: MESH_EXTERNAL
+  resolution: DNS
+
+---
+# Egress Gateway for external API calls
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: external-apis-gateway
+  namespace: rbi-compliance
+spec:
+  selector:
+    istio: egressgateway
+  servers:
+  - port:
+      number: 443
+      name: tls
+      protocol: TLS
+    hosts:
+    - banking-api.example.com
+    - rbi-api.gov.in
+    - cibil-api.com
+    tls:
+      mode: PASSTHROUGH
+
+---
+# Virtual Service for external API routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: external-apis-vs
+  namespace: rbi-compliance
+spec:
+  hosts:
+  - banking-api.example.com
+  - rbi-api.gov.in
+  - cibil-api.com
+  gateways:
+  - external-apis-gateway
+  - mesh
+  tls:
+  - match:
+    - port: 443
+      sniHosts:
+      - banking-api.example.com
+    route:
+    - destination:
+        host: banking-api.example.com
+        port:
+          number: 443
+      weight: 100
+  - match:
+    - port: 443
+      sniHosts:
+      - rbi-api.gov.in
+    route:
+    - destination:
+        host: rbi-api.gov.in
+        port:
+          number: 443
+      weight: 100
+  - match:
+    - port: 443
+      sniHosts:
+      - cibil-api.com
+    route:
+    - destination:
+        host: cibil-api.com
+        port:
+          number: 443
+      weight: 100
+
+---
+# Destination Rule for external APIs
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: external-apis-dr
+  namespace: rbi-compliance
+spec:
+  host: "*.example.com"
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 20
+        maxRequestsPerConnection: 5
+        maxRetries: 3
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      consecutive5xxErrors: 5
+      interval: 60s
+      baseEjectionTime: 60s
+
+---
+# Peer Authentication for mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: rbi-compliance
+spec:
+  mtls:
+    mode: STRICT
+
+---
+# Authorization Policy for service access
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: rbi-compliance-authz
+  namespace: rbi-compliance
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/rbi-compliance/sa/api-gateway"]
+    to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/api/auth/*"]
+  - from:
+    - source:
+        namespaces: ["istio-system"]
+    to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/health", "/metrics"]
+
+---
+# Telemetry configuration
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: rbi-compliance-telemetry
+  namespace: rbi-compliance
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        request_protocol:
+          value: "http"
+    - match:
+        metric: REQUEST_COUNT
+      disabled: false
+    - match:
+        metric: REQUEST_DURATION
+      disabled: false
+    - match:
+        metric: TCP_OPENED_CONNECTIONS
+      disabled: false
+  accessLogging:
+  - providers:
+    - name: otel

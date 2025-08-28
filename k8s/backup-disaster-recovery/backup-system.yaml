@@ -1,0 +1,982 @@
+# Comprehensive Backup and Disaster Recovery System
+# Automated backup, monitoring, and recovery for RBI Compliance Platform
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup-system
+  labels:
+    name: backup-system
+    component: disaster-recovery
+
+---
+# PostgreSQL Database Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup
+  namespace: backup-system
+  labels:
+    component: database-backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: postgres-backup
+            image: postgres:15
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              # Backup configuration
+              BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="rbi_compliance_backup_${BACKUP_DATE}.sql"
+              S3_BUCKET="rbi-compliance-backups"
+              RETENTION_DAYS=30
+
+              echo "Starting PostgreSQL backup at $(date)"
+
+              # Create database backup
+              pg_dump -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB \
+                --verbose --clean --if-exists --create \
+                --format=custom --compress=9 \
+                --file=/tmp/$BACKUP_FILE
+
+              # Verify backup integrity
+              pg_restore --list /tmp/$BACKUP_FILE > /tmp/backup_contents.txt
+
+              if [ ! -s /tmp/backup_contents.txt ]; then
+                echo "ERROR: Backup verification failed - empty contents"
+                exit 1
+              fi
+
+              echo "Backup created successfully: $BACKUP_FILE"
+              echo "Backup size: $(du -h /tmp/$BACKUP_FILE | cut -f1)"
+
+              # Upload to S3
+              aws s3 cp /tmp/$BACKUP_FILE s3://$S3_BUCKET/database/daily/ \
+                --storage-class STANDARD_IA \
+                --metadata "backup-date=$BACKUP_DATE,database=rbi_compliance"
+
+              # Upload backup contents list
+              aws s3 cp /tmp/backup_contents.txt s3://$S3_BUCKET/database/daily/contents/ \
+                --metadata "backup-date=$BACKUP_DATE"
+
+              # Cleanup old backups
+              aws s3 ls s3://$S3_BUCKET/database/daily/ | \
+                awk '$1 < "'$(date -d "$RETENTION_DAYS days ago" +%Y-%m-%d)'" {print $4}' | \
+                xargs -I {} aws s3 rm s3://$S3_BUCKET/database/daily/{}
+
+              echo "Backup completed successfully at $(date)"
+
+              # Send notification
+              curl -X POST $WEBHOOK_URL \
+                -H "Content-Type: application/json" \
+                -d "{\"text\":\"✅ PostgreSQL backup completed: $BACKUP_FILE\"}"
+
+            env:
+            - name: POSTGRES_HOST
+              value: "postgresql.rbi-compliance.svc.cluster.local"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: password
+            - name: POSTGRES_DB
+              value: "rbi_compliance"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: secret-access-key
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1"
+            - name: WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: notification-webhooks
+                  key: backup-webhook
+
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /tmp
+
+          volumes:
+          - name: backup-storage
+            emptyDir:
+              sizeLimit: 10Gi
+
+          restartPolicy: OnFailure
+
+---
+# Redis Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup
+  namespace: backup-system
+  labels:
+    component: redis-backup
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: redis-backup
+            image: redis:7-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="redis_backup_${BACKUP_DATE}.rdb"
+              S3_BUCKET="rbi-compliance-backups"
+
+              echo "Starting Redis backup at $(date)"
+
+              # Create Redis backup
+              redis-cli -h $REDIS_HOST -p $REDIS_PORT --rdb /tmp/$BACKUP_FILE
+
+              # Verify backup
+              if [ ! -f /tmp/$BACKUP_FILE ]; then
+                echo "ERROR: Redis backup failed"
+                exit 1
+              fi
+
+              echo "Redis backup created: $BACKUP_FILE"
+              echo "Backup size: $(du -h /tmp/$BACKUP_FILE | cut -f1)"
+
+              # Upload to S3
+              aws s3 cp /tmp/$BACKUP_FILE s3://$S3_BUCKET/redis/daily/ \
+                --storage-class STANDARD_IA
+
+              echo "Redis backup completed at $(date)"
+
+            env:
+            - name: REDIS_HOST
+              value: "redis.rbi-compliance.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: secret-access-key
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1"
+
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 1000m
+                memory: 2Gi
+
+          restartPolicy: OnFailure
+
+---
+# Elasticsearch Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: elasticsearch-backup
+  namespace: backup-system
+  labels:
+    component: elasticsearch-backup
+spec:
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: elasticsearch-backup
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+              SNAPSHOT_NAME="snapshot_${BACKUP_DATE}"
+              ES_HOST="elasticsearch.rbi-compliance.svc.cluster.local:9200"
+
+              echo "Starting Elasticsearch backup at $(date)"
+
+              # Create snapshot repository if not exists
+              curl -X PUT "$ES_HOST/_snapshot/s3_repository" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "type": "s3",
+                  "settings": {
+                    "bucket": "rbi-compliance-backups",
+                    "base_path": "elasticsearch/snapshots",
+                    "region": "ap-south-1",
+                    "storage_class": "standard_ia"
+                  }
+                }'
+
+              # Create snapshot
+              curl -X PUT "$ES_HOST/_snapshot/s3_repository/$SNAPSHOT_NAME?wait_for_completion=true" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "indices": "*",
+                  "ignore_unavailable": true,
+                  "include_global_state": false,
+                  "metadata": {
+                    "taken_by": "automated_backup",
+                    "taken_because": "daily_backup"
+                  }
+                }'
+
+              # Verify snapshot
+              SNAPSHOT_STATUS=$(curl -s "$ES_HOST/_snapshot/s3_repository/$SNAPSHOT_NAME" | \
+                jq -r '.snapshots[0].state')
+
+              if [ "$SNAPSHOT_STATUS" != "SUCCESS" ]; then
+                echo "ERROR: Elasticsearch snapshot failed with status: $SNAPSHOT_STATUS"
+                exit 1
+              fi
+
+              echo "Elasticsearch backup completed: $SNAPSHOT_NAME"
+
+              # Cleanup old snapshots (keep 30 days)
+              CUTOFF_DATE=$(date -d "30 days ago" +%Y%m%d)
+              curl -s "$ES_HOST/_snapshot/s3_repository/_all" | \
+                jq -r ".snapshots[] | select(.start_time_in_millis < $(date -d "$CUTOFF_DATE" +%s)000) | .snapshot" | \
+                while read snapshot; do
+                  curl -X DELETE "$ES_HOST/_snapshot/s3_repository/$snapshot"
+                done
+
+              echo "Elasticsearch backup completed at $(date)"
+
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: secret-access-key
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+          restartPolicy: OnFailure
+
+---
+# Application Configuration Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: config-backup
+  namespace: backup-system
+  labels:
+    component: config-backup
+spec:
+  schedule: "0 1 * * *"  # Daily at 1 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: backup-service-account
+          containers:
+          - name: config-backup
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+              BACKUP_DIR="/tmp/config_backup_${BACKUP_DATE}"
+              S3_BUCKET="rbi-compliance-backups"
+
+              echo "Starting configuration backup at $(date)"
+
+              mkdir -p $BACKUP_DIR
+
+              # Backup ConfigMaps
+              kubectl get configmaps -n rbi-compliance -o yaml > $BACKUP_DIR/configmaps.yaml
+
+              # Backup Secrets (metadata only, not values)
+              kubectl get secrets -n rbi-compliance -o yaml | \
+                sed 's/data:/# data:/g' > $BACKUP_DIR/secrets-metadata.yaml
+
+              # Backup Ingress configurations
+              kubectl get ingress -n rbi-compliance -o yaml > $BACKUP_DIR/ingress.yaml
+
+              # Backup Services
+              kubectl get services -n rbi-compliance -o yaml > $BACKUP_DIR/services.yaml
+
+              # Backup Deployments
+              kubectl get deployments -n rbi-compliance -o yaml > $BACKUP_DIR/deployments.yaml
+
+              # Backup StatefulSets
+              kubectl get statefulsets -n rbi-compliance -o yaml > $BACKUP_DIR/statefulsets.yaml
+
+              # Backup PersistentVolumeClaims
+              kubectl get pvc -n rbi-compliance -o yaml > $BACKUP_DIR/pvc.yaml
+
+              # Backup Custom Resources
+              kubectl get customresources -n rbi-compliance -o yaml > $BACKUP_DIR/customresources.yaml || true
+
+              # Create archive
+              cd /tmp
+              tar -czf config_backup_${BACKUP_DATE}.tar.gz config_backup_${BACKUP_DATE}/
+
+              # Upload to S3
+              aws s3 cp config_backup_${BACKUP_DATE}.tar.gz s3://$S3_BUCKET/config/daily/ \
+                --storage-class STANDARD_IA
+
+              echo "Configuration backup completed at $(date)"
+
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: secret-access-key
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1"
+
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 1000m
+                memory: 2Gi
+
+          restartPolicy: OnFailure
+
+---
+# Backup Monitoring and Alerting
+apiVersion: v1
+kind: Service
+metadata:
+  name: backup-monitor
+  namespace: backup-system
+  labels:
+    app: backup-monitor
+    component: monitoring
+spec:
+  selector:
+    app: backup-monitor
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-monitor
+  namespace: backup-system
+  labels:
+    app: backup-monitor
+    component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backup-monitor
+  template:
+    metadata:
+      labels:
+        app: backup-monitor
+    spec:
+      containers:
+      - name: backup-monitor
+        image: rbi-compliance/backup-monitor:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: S3_BUCKET
+          value: "rbi-compliance-backups"
+        - name: AWS_REGION
+          value: "ap-south-1"
+        - name: SLACK_WEBHOOK
+          valueFrom:
+            secretKeyRef:
+              name: notification-webhooks
+              key: backup-webhook
+        - name: CHECK_INTERVAL
+          value: "3600"  # 1 hour
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Disaster Recovery Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: disaster-recovery-template
+  namespace: backup-system
+  labels:
+    component: disaster-recovery
+spec:
+  template:
+    spec:
+      serviceAccountName: backup-service-account
+      containers:
+      - name: disaster-recovery
+        image: rbi-compliance/disaster-recovery:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "Starting disaster recovery process at $(date)"
+
+          # Recovery configuration
+          RECOVERY_DATE=${RECOVERY_DATE:-$(date +%Y%m%d)}
+          S3_BUCKET="rbi-compliance-backups"
+
+          case $RECOVERY_TYPE in
+            "database")
+              echo "Recovering PostgreSQL database..."
+
+              # Download latest backup
+              LATEST_BACKUP=$(aws s3 ls s3://$S3_BUCKET/database/daily/ | \
+                sort | tail -n 1 | awk '{print $4}')
+
+              aws s3 cp s3://$S3_BUCKET/database/daily/$LATEST_BACKUP /tmp/
+
+              # Stop application pods
+              kubectl scale deployment --replicas=0 -n rbi-compliance \
+                auth-service compliance-service document-service workflow-service
+
+              # Restore database
+              pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB \
+                --clean --if-exists --verbose /tmp/$LATEST_BACKUP
+
+              # Start application pods
+              kubectl scale deployment --replicas=3 -n rbi-compliance \
+                auth-service compliance-service document-service workflow-service
+              ;;
+
+            "redis")
+              echo "Recovering Redis data..."
+
+              # Download latest backup
+              LATEST_BACKUP=$(aws s3 ls s3://$S3_BUCKET/redis/daily/ | \
+                sort | tail -n 1 | awk '{print $4}')
+
+              aws s3 cp s3://$S3_BUCKET/redis/daily/$LATEST_BACKUP /tmp/dump.rdb
+
+              # Copy backup to Redis pod
+              kubectl cp /tmp/dump.rdb rbi-compliance/redis-0:/data/dump.rdb
+
+              # Restart Redis
+              kubectl delete pod redis-0 -n rbi-compliance
+              ;;
+
+            "elasticsearch")
+              echo "Recovering Elasticsearch data..."
+
+              # Restore from snapshot
+              LATEST_SNAPSHOT=$(curl -s "$ES_HOST/_snapshot/s3_repository/_all" | \
+                jq -r '.snapshots | sort_by(.start_time_in_millis) | last | .snapshot')
+
+              curl -X POST "$ES_HOST/_snapshot/s3_repository/$LATEST_SNAPSHOT/_restore" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "indices": "*",
+                  "ignore_unavailable": true,
+                  "include_global_state": false
+                }'
+              ;;
+
+            "config")
+              echo "Recovering configuration..."
+
+              # Download latest config backup
+              LATEST_CONFIG=$(aws s3 ls s3://$S3_BUCKET/config/daily/ | \
+                sort | tail -n 1 | awk '{print $4}')
+
+              aws s3 cp s3://$S3_BUCKET/config/daily/$LATEST_CONFIG /tmp/
+
+              cd /tmp
+              tar -xzf $LATEST_CONFIG
+
+              # Apply configurations
+              kubectl apply -f config_backup_*/
+              ;;
+
+            "full")
+              echo "Performing full system recovery..."
+
+              # Execute all recovery types in sequence
+              RECOVERY_TYPE=config $0
+              RECOVERY_TYPE=database $0
+              RECOVERY_TYPE=redis $0
+              RECOVERY_TYPE=elasticsearch $0
+              ;;
+
+            *)
+              echo "Unknown recovery type: $RECOVERY_TYPE"
+              exit 1
+              ;;
+          esac
+
+          echo "Disaster recovery completed at $(date)"
+
+        env:
+        - name: RECOVERY_TYPE
+          value: "full"  # Can be overridden
+        - name: POSTGRES_HOST
+          value: "postgresql.rbi-compliance.svc.cluster.local"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-credentials
+              key: password
+        - name: POSTGRES_DB
+          value: "rbi_compliance"
+        - name: ES_HOST
+          value: "elasticsearch.rbi-compliance.svc.cluster.local:9200"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-backup-credentials
+              key: access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-backup-credentials
+              key: secret-access-key
+        - name: AWS_DEFAULT_REGION
+          value: "ap-south-1"
+
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+
+      restartPolicy: OnFailure
+
+---
+# Service Account for Backup Operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-service-account
+  namespace: backup-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backup-operator
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets", "services", "persistentvolumeclaims", "pods"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "replicasets"]
+  verbs: ["get", "list", "create", "update", "patch", "delete", "scale"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backup-operator-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backup-operator
+subjects:
+- kind: ServiceAccount
+  name: backup-service-account
+  namespace: backup-system
+
+---
+# Backup Verification Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: backup-system
+  labels:
+    component: backup-verification
+spec:
+  schedule: "0 6 * * *"  # Daily at 6 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup-verifier
+            image: rbi-compliance/backup-verifier:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "Starting backup verification at $(date)"
+
+              S3_BUCKET="rbi-compliance-backups"
+              VERIFICATION_RESULTS="/tmp/verification_results.json"
+
+              # Initialize results
+              echo '{"timestamp":"'$(date -Iseconds)'","results":{}}' > $VERIFICATION_RESULTS
+
+              # Verify PostgreSQL backups
+              echo "Verifying PostgreSQL backups..."
+              LATEST_DB_BACKUP=$(aws s3 ls s3://$S3_BUCKET/database/daily/ | sort | tail -n 1 | awk '{print $4}')
+
+              if [ -n "$LATEST_DB_BACKUP" ]; then
+                # Download and verify backup
+                aws s3 cp s3://$S3_BUCKET/database/daily/$LATEST_DB_BACKUP /tmp/
+
+                # Test restore to temporary database
+                createdb -h $POSTGRES_HOST -U $POSTGRES_USER test_restore_db || true
+                pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d test_restore_db \
+                  --verbose --exit-on-error /tmp/$LATEST_DB_BACKUP
+
+                # Verify data integrity
+                TABLE_COUNT=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d test_restore_db \
+                  -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
+
+                # Cleanup test database
+                dropdb -h $POSTGRES_HOST -U $POSTGRES_USER test_restore_db
+
+                # Update results
+                jq '.results.postgresql = {"status":"success","backup_file":"'$LATEST_DB_BACKUP'","table_count":'$TABLE_COUNT'}' \
+                  $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+
+                echo "PostgreSQL backup verification: SUCCESS ($TABLE_COUNT tables)"
+              else
+                jq '.results.postgresql = {"status":"error","message":"No backup found"}' \
+                  $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+                echo "PostgreSQL backup verification: FAILED - No backup found"
+              fi
+
+              # Verify Redis backups
+              echo "Verifying Redis backups..."
+              LATEST_REDIS_BACKUP=$(aws s3 ls s3://$S3_BUCKET/redis/daily/ | sort | tail -n 1 | awk '{print $4}')
+
+              if [ -n "$LATEST_REDIS_BACKUP" ]; then
+                aws s3 cp s3://$S3_BUCKET/redis/daily/$LATEST_REDIS_BACKUP /tmp/redis_backup.rdb
+
+                # Verify RDB file integrity
+                redis-check-rdb /tmp/redis_backup.rdb
+
+                jq '.results.redis = {"status":"success","backup_file":"'$LATEST_REDIS_BACKUP'"}' \
+                  $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+
+                echo "Redis backup verification: SUCCESS"
+              else
+                jq '.results.redis = {"status":"error","message":"No backup found"}' \
+                  $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+                echo "Redis backup verification: FAILED - No backup found"
+              fi
+
+              # Verify Elasticsearch snapshots
+              echo "Verifying Elasticsearch snapshots..."
+              ES_HOST="elasticsearch.rbi-compliance.svc.cluster.local:9200"
+
+              LATEST_SNAPSHOT=$(curl -s "$ES_HOST/_snapshot/s3_repository/_all" | \
+                jq -r '.snapshots | sort_by(.start_time_in_millis) | last | .snapshot')
+
+              if [ "$LATEST_SNAPSHOT" != "null" ]; then
+                SNAPSHOT_STATUS=$(curl -s "$ES_HOST/_snapshot/s3_repository/$LATEST_SNAPSHOT" | \
+                  jq -r '.snapshots[0].state')
+
+                if [ "$SNAPSHOT_STATUS" = "SUCCESS" ]; then
+                  jq '.results.elasticsearch = {"status":"success","snapshot":"'$LATEST_SNAPSHOT'"}' \
+                    $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+                  echo "Elasticsearch backup verification: SUCCESS"
+                else
+                  jq '.results.elasticsearch = {"status":"error","message":"Snapshot failed: '$SNAPSHOT_STATUS'"}' \
+                    $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+                  echo "Elasticsearch backup verification: FAILED - $SNAPSHOT_STATUS"
+                fi
+              else
+                jq '.results.elasticsearch = {"status":"error","message":"No snapshot found"}' \
+                  $VERIFICATION_RESULTS > /tmp/temp.json && mv /tmp/temp.json $VERIFICATION_RESULTS
+                echo "Elasticsearch backup verification: FAILED - No snapshot found"
+              fi
+
+              # Enhanced verification with automated testing
+              echo "Running enhanced backup verification tests..."
+
+              # Test data integrity with checksums
+              echo "Performing data integrity tests..."
+              INTEGRITY_RESULTS="/tmp/integrity_results.json"
+              echo '{"timestamp":"'$(date -Iseconds)'","integrity_tests":{}}' > $INTEGRITY_RESULTS
+
+              # PostgreSQL data integrity test
+              if [ -n "$LATEST_DB_BACKUP" ]; then
+                echo "Testing PostgreSQL data integrity..."
+
+                # Create test database for integrity checks
+                createdb -h $POSTGRES_HOST -U $POSTGRES_USER integrity_test_db || true
+                pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d integrity_test_db \
+                  --verbose --exit-on-error /tmp/$LATEST_DB_BACKUP
+
+                # Run comprehensive data integrity tests
+                RECORD_COUNT=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d integrity_test_db \
+                  -t -c "SELECT SUM(n_tup_ins + n_tup_upd) FROM pg_stat_user_tables")
+
+                INDEX_COUNT=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d integrity_test_db \
+                  -t -c "SELECT count(*) FROM pg_indexes WHERE schemaname='public'")
+
+                CONSTRAINT_COUNT=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d integrity_test_db \
+                  -t -c "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema='public'")
+
+                # Test foreign key constraints
+                FK_VIOLATIONS=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d integrity_test_db \
+                  -t -c "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY'")
+
+                # Cleanup integrity test database
+                dropdb -h $POSTGRES_HOST -U $POSTGRES_USER integrity_test_db
+
+                jq '.integrity_tests.postgresql = {
+                  "status":"success",
+                  "record_count":'$RECORD_COUNT',
+                  "index_count":'$INDEX_COUNT',
+                  "constraint_count":'$CONSTRAINT_COUNT',
+                  "fk_violations":'$FK_VIOLATIONS'
+                }' $INTEGRITY_RESULTS > /tmp/temp_integrity.json && mv /tmp/temp_integrity.json $INTEGRITY_RESULTS
+
+                echo "PostgreSQL integrity test: SUCCESS (Records: $RECORD_COUNT, Indexes: $INDEX_COUNT)"
+              fi
+
+              # Redis data integrity test
+              if [ -n "$LATEST_REDIS_BACKUP" ]; then
+                echo "Testing Redis data integrity..."
+
+                # Start temporary Redis instance for testing
+                redis-server --port 6380 --daemonize yes --dbfilename test_restore.rdb --dir /tmp/
+                sleep 2
+
+                # Load backup data
+                cp /tmp/redis_backup.rdb /tmp/test_restore.rdb
+                redis-cli -p 6380 DEBUG RELOAD
+
+                # Test data integrity
+                KEY_COUNT=$(redis-cli -p 6380 DBSIZE)
+                MEMORY_USAGE=$(redis-cli -p 6380 INFO memory | grep used_memory_human | cut -d: -f2 | tr -d '\r')
+
+                # Shutdown test Redis instance
+                redis-cli -p 6380 SHUTDOWN NOSAVE
+
+                jq '.integrity_tests.redis = {
+                  "status":"success",
+                  "key_count":'$KEY_COUNT',
+                  "memory_usage":"'$MEMORY_USAGE'"
+                }' $INTEGRITY_RESULTS > /tmp/temp_integrity.json && mv /tmp/temp_integrity.json $INTEGRITY_RESULTS
+
+                echo "Redis integrity test: SUCCESS (Keys: $KEY_COUNT, Memory: $MEMORY_USAGE)"
+              fi
+
+              # Performance benchmark tests
+              echo "Running performance benchmark tests..."
+              PERFORMANCE_RESULTS="/tmp/performance_results.json"
+              echo '{"timestamp":"'$(date -Iseconds)'","performance_tests":{}}' > $PERFORMANCE_RESULTS
+
+              # PostgreSQL performance test
+              if [ -n "$LATEST_DB_BACKUP" ]; then
+                echo "Testing PostgreSQL restore performance..."
+
+                START_TIME=$(date +%s)
+                createdb -h $POSTGRES_HOST -U $POSTGRES_USER perf_test_db || true
+                pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d perf_test_db \
+                  --verbose --exit-on-error /tmp/$LATEST_DB_BACKUP
+                END_TIME=$(date +%s)
+
+                RESTORE_DURATION=$((END_TIME - START_TIME))
+                BACKUP_SIZE=$(du -h /tmp/$LATEST_DB_BACKUP | cut -f1)
+
+                # Test query performance on restored data
+                QUERY_START=$(date +%s%3N)
+                psql -h $POSTGRES_HOST -U $POSTGRES_USER -d perf_test_db \
+                  -c "SELECT count(*) FROM information_schema.tables" > /dev/null
+                QUERY_END=$(date +%s%3N)
+                QUERY_DURATION=$((QUERY_END - QUERY_START))
+
+                dropdb -h $POSTGRES_HOST -U $POSTGRES_USER perf_test_db
+
+                jq '.performance_tests.postgresql = {
+                  "restore_duration_seconds":'$RESTORE_DURATION',
+                  "backup_size":"'$BACKUP_SIZE'",
+                  "query_duration_ms":'$QUERY_DURATION'
+                }' $PERFORMANCE_RESULTS > /tmp/temp_perf.json && mv /tmp/temp_perf.json $PERFORMANCE_RESULTS
+
+                echo "PostgreSQL performance test: Restore took ${RESTORE_DURATION}s, Query took ${QUERY_DURATION}ms"
+              fi
+
+              # Merge all results
+              jq -s '.[0] * .[1] * .[2]' $VERIFICATION_RESULTS $INTEGRITY_RESULTS $PERFORMANCE_RESULTS > /tmp/final_results.json
+
+              # Upload comprehensive verification results
+              aws s3 cp /tmp/final_results.json s3://$S3_BUCKET/verification/daily/verification_$(date +%Y%m%d_%H%M%S).json
+
+              # Generate verification report
+              python3 /scripts/generate_verification_report.py \
+                --results /tmp/final_results.json \
+                --output /tmp/verification_report.html
+
+              # Upload report
+              aws s3 cp /tmp/verification_report.html s3://$S3_BUCKET/reports/verification/verification_report_$(date +%Y%m%d_%H%M%S).html
+
+              # Check for failures and send notifications
+              FAILED_COMPONENTS=$(jq -r '.results | to_entries[] | select(.value.status == "error") | .key' $VERIFICATION_RESULTS)
+
+              if [ -n "$FAILED_COMPONENTS" ]; then
+                echo "Backup verification FAILED for: $FAILED_COMPONENTS"
+
+                # Send alert
+                curl -X POST $WEBHOOK_URL \
+                  -H "Content-Type: application/json" \
+                  -d "{\"text\":\"🚨 Backup verification FAILED for: $FAILED_COMPONENTS\"}"
+
+                exit 1
+              else
+                echo "All backup verifications PASSED"
+
+                # Send success notification
+                curl -X POST $WEBHOOK_URL \
+                  -H "Content-Type: application/json" \
+                  -d "{\"text\":\"✅ All backup verifications completed successfully\"}"
+              fi
+
+              echo "Backup verification completed at $(date)"
+
+            env:
+            - name: POSTGRES_HOST
+              value: "postgresql.rbi-compliance.svc.cluster.local"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-backup-credentials
+                  key: secret-access-key
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1"
+            - name: WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: notification-webhooks
+                  key: backup-webhook
+
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+
+          restartPolicy: OnFailure

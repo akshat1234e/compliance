@@ -1,0 +1,567 @@
+# Comprehensive Unit Test Suite Configuration
+# Automated unit testing for all RBI Compliance Platform microservices
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unit-test-config
+  namespace: rbi-compliance
+  labels:
+    component: testing
+data:
+  test-configuration.yaml: |
+    # Unit Test Configuration
+    test:
+      profiles:
+        active: test
+      
+      database:
+        url: jdbc:h2:mem:testdb
+        driver-class-name: org.h2.Driver
+        username: sa
+        password: 
+        
+      jpa:
+        hibernate:
+          ddl-auto: create-drop
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+            
+      redis:
+        host: localhost
+        port: 6379
+        database: 1
+        
+      elasticsearch:
+        host: localhost
+        port: 9200
+        
+      security:
+        jwt:
+          secret: test-secret-key-for-unit-tests-only
+          expiration: 3600000
+          
+      logging:
+        level:
+          com.rbi.compliance: DEBUG
+          org.springframework.security: DEBUG
+          
+      coverage:
+        minimum-threshold: 80
+        exclude-packages:
+          - "*.config.*"
+          - "*.dto.*"
+          - "*.entity.*"
+
+---
+# Test Execution Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: unit-tests-execution
+  namespace: rbi-compliance
+  labels:
+    component: testing
+    test-type: unit
+spec:
+  template:
+    spec:
+      containers:
+      - name: unit-tests
+        image: maven:3.9-openjdk-17
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting comprehensive unit test execution..."
+          
+          # Test results directory
+          mkdir -p /test-results
+          
+          # Services to test
+          SERVICES=(
+            "auth-service"
+            "compliance-service" 
+            "document-service"
+            "workflow-service"
+            "integration-gateway"
+            "api-gateway"
+          )
+          
+          # Overall test results
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+          COVERAGE_RESULTS=()
+          
+          for service in "${SERVICES[@]}"; do
+            echo "========================================="
+            echo "Testing $service"
+            echo "========================================="
+            
+            cd /workspace/services/$service
+            
+            # Run unit tests with coverage
+            mvn clean test jacoco:report \
+              -Dspring.profiles.active=test \
+              -Dmaven.test.failure.ignore=true \
+              -Djacoco.destFile=/test-results/${service}-jacoco.exec
+            
+            # Extract test results
+            if [ -f target/surefire-reports/TEST-*.xml ]; then
+              SERVICE_TESTS=$(grep -o 'tests="[0-9]*"' target/surefire-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              SERVICE_FAILURES=$(grep -o 'failures="[0-9]*"' target/surefire-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              SERVICE_ERRORS=$(grep -o 'errors="[0-9]*"' target/surefire-reports/TEST-*.xml | \
+                cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+              
+              SERVICE_PASSED=$((SERVICE_TESTS - SERVICE_FAILURES - SERVICE_ERRORS))
+              SERVICE_FAILED=$((SERVICE_FAILURES + SERVICE_ERRORS))
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + SERVICE_TESTS))
+              PASSED_TESTS=$((PASSED_TESTS + SERVICE_PASSED))
+              FAILED_TESTS=$((FAILED_TESTS + SERVICE_FAILED))
+              
+              echo "$service: $SERVICE_PASSED passed, $SERVICE_FAILED failed"
+            fi
+            
+            # Extract coverage results
+            if [ -f target/site/jacoco/index.html ]; then
+              COVERAGE=$(grep -o 'Total[^%]*[0-9]*%' target/site/jacoco/index.html | \
+                grep -o '[0-9]*%' | head -1 | tr -d '%')
+              COVERAGE_RESULTS+=("$service:$COVERAGE")
+              echo "$service coverage: $COVERAGE%"
+            fi
+            
+            # Copy test reports
+            cp -r target/surefire-reports /test-results/${service}-surefire-reports || true
+            cp -r target/site/jacoco /test-results/${service}-jacoco-report || true
+            
+            cd /workspace
+          done
+          
+          # Generate summary report
+          echo "========================================="
+          echo "UNIT TEST EXECUTION SUMMARY"
+          echo "========================================="
+          echo "Total Tests: $TOTAL_TESTS"
+          echo "Passed: $PASSED_TESTS"
+          echo "Failed: $FAILED_TESTS"
+          echo "Success Rate: $(( (PASSED_TESTS * 100) / TOTAL_TESTS ))%"
+          echo ""
+          echo "Coverage Results:"
+          for result in "${COVERAGE_RESULTS[@]}"; do
+            echo "  $result"
+          done
+          
+          # Generate JSON report
+          cat > /test-results/unit-test-summary.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "test_type": "unit",
+            "summary": {
+              "total_tests": $TOTAL_TESTS,
+              "passed_tests": $PASSED_TESTS,
+              "failed_tests": $FAILED_TESTS,
+              "success_rate": $(( (PASSED_TESTS * 100) / TOTAL_TESTS ))
+            },
+            "coverage": [
+          EOF
+          
+          for i in "${!COVERAGE_RESULTS[@]}"; do
+            IFS=':' read -r service coverage <<< "${COVERAGE_RESULTS[i]}"
+            echo "      {\"service\": \"$service\", \"coverage\": $coverage}" >> /test-results/unit-test-summary.json
+            if [ $i -lt $((${#COVERAGE_RESULTS[@]} - 1)) ]; then
+              echo "," >> /test-results/unit-test-summary.json
+            fi
+          done
+          
+          cat >> /test-results/unit-test-summary.json << EOF
+            ],
+            "services": [
+          EOF
+          
+          for i in "${!SERVICES[@]}"; do
+            echo "      \"${SERVICES[i]}\"" >> /test-results/unit-test-summary.json
+            if [ $i -lt $((${#SERVICES[@]} - 1)) ]; then
+              echo "," >> /test-results/unit-test-summary.json
+            fi
+          done
+          
+          echo "    ]" >> /test-results/unit-test-summary.json
+          echo "  }" >> /test-results/unit-test-summary.json
+          
+          # Upload results to S3
+          if [ -n "${AWS_S3_BUCKET:-}" ]; then
+            aws s3 sync /test-results s3://$AWS_S3_BUCKET/test-results/unit/$(date +%Y%m%d_%H%M%S)/
+          fi
+          
+          # Send notification
+          if [ -n "${WEBHOOK_URL:-}" ]; then
+            if [ $FAILED_TESTS -eq 0 ]; then
+              curl -X POST "$WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"text\":\"✅ Unit tests passed: $PASSED_TESTS/$TOTAL_TESTS tests successful\"}"
+            else
+              curl -X POST "$WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"text\":\"❌ Unit tests failed: $FAILED_TESTS/$TOTAL_TESTS tests failed\"}"
+            fi
+          fi
+          
+          # Exit with error if tests failed
+          if [ $FAILED_TESTS -gt 0 ]; then
+            echo "Unit tests failed!"
+            exit 1
+          fi
+          
+          echo "All unit tests passed successfully!"
+        
+        env:
+        - name: MAVEN_OPTS
+          value: "-Xmx2g -XX:MaxMetaspaceSize=512m"
+        - name: AWS_S3_BUCKET
+          value: "rbi-compliance-test-results"
+        - name: WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: test-notifications
+              key: webhook-url
+              optional: true
+        
+        resources:
+          requests:
+            cpu: 2000m
+            memory: 4Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+        - name: maven-cache
+          mountPath: /root/.m2
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: maven-cache
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Frontend Unit Tests Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: frontend-unit-tests
+  namespace: rbi-compliance
+  labels:
+    component: testing
+    test-type: frontend-unit
+spec:
+  template:
+    spec:
+      containers:
+      - name: frontend-tests
+        image: node:18-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          
+          echo "Starting frontend unit test execution..."
+          
+          cd /workspace/frontend
+          
+          # Install dependencies
+          npm ci
+          
+          # Run unit tests with coverage
+          npm run test:coverage -- --watchAll=false --ci
+          
+          # Generate test report
+          npm run test:report
+          
+          # Copy results
+          cp -r coverage /test-results/frontend-coverage
+          cp -r test-results /test-results/frontend-test-results || true
+          
+          # Extract metrics
+          COVERAGE=$(grep -o '"pct":[0-9.]*' coverage/coverage-summary.json | \
+            head -1 | cut -d':' -f2)
+          
+          echo "Frontend test coverage: $COVERAGE%"
+          
+          # Generate summary
+          cat > /test-results/frontend-summary.json << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "test_type": "frontend-unit",
+            "coverage": $COVERAGE,
+            "framework": "Jest + React Testing Library"
+          }
+          EOF
+          
+          echo "Frontend unit tests completed successfully!"
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Test Coverage Analysis Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: coverage-analysis
+  namespace: rbi-compliance
+  labels:
+    component: testing
+    test-type: coverage
+spec:
+  template:
+    spec:
+      containers:
+      - name: coverage-analyzer
+        image: rbi-compliance/test-analyzer:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting coverage analysis..."
+          
+          # Aggregate coverage reports
+          mkdir -p /analysis/aggregated
+          
+          # Combine JaCoCo reports
+          java -jar /tools/jacoco-cli.jar merge \
+            /test-results/*-jacoco.exec \
+            --destfile /analysis/aggregated/merged.exec
+          
+          # Generate aggregated report
+          java -jar /tools/jacoco-cli.jar report \
+            /analysis/aggregated/merged.exec \
+            --classfiles /workspace/services/*/target/classes \
+            --sourcefiles /workspace/services/*/src/main/java \
+            --html /analysis/aggregated/html \
+            --xml /analysis/aggregated/jacoco.xml \
+            --csv /analysis/aggregated/jacoco.csv
+          
+          # Analyze coverage thresholds
+          python3 /scripts/coverage-analyzer.py \
+            --jacoco-xml /analysis/aggregated/jacoco.xml \
+            --frontend-json /test-results/frontend-coverage/coverage-summary.json \
+            --threshold 80 \
+            --output /analysis/coverage-report.json
+          
+          # Generate coverage badge
+          python3 /scripts/generate-badge.py \
+            --coverage-file /analysis/coverage-report.json \
+            --output /analysis/coverage-badge.svg
+          
+          # Upload results
+          if [ -n "${AWS_S3_BUCKET:-}" ]; then
+            aws s3 sync /analysis s3://$AWS_S3_BUCKET/coverage-analysis/$(date +%Y%m%d_%H%M%S)/
+          fi
+          
+          echo "Coverage analysis completed!"
+        
+        env:
+        - name: AWS_S3_BUCKET
+          value: "rbi-compliance-test-results"
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        
+        volumeMounts:
+        - name: test-results
+          mountPath: /test-results
+        - name: workspace
+          mountPath: /workspace
+        - name: analysis-output
+          mountPath: /analysis
+      
+      volumes:
+      - name: test-results
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: analysis-output
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Test Automation CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: automated-unit-tests
+  namespace: rbi-compliance
+  labels:
+    component: testing
+    automation: unit-tests
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: automated-tests
+            image: rbi-compliance/test-runner:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              
+              echo "Starting automated unit test execution..."
+              
+              # Run unit tests
+              kubectl create job unit-tests-$(date +%s) \
+                --from=job/unit-tests-execution \
+                -n rbi-compliance
+              
+              # Run frontend tests
+              kubectl create job frontend-tests-$(date +%s) \
+                --from=job/frontend-unit-tests \
+                -n rbi-compliance
+              
+              # Wait for completion
+              sleep 300
+              
+              # Run coverage analysis
+              kubectl create job coverage-analysis-$(date +%s) \
+                --from=job/coverage-analysis \
+                -n rbi-compliance
+              
+              echo "Automated test execution triggered successfully!"
+            
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+          
+          restartPolicy: OnFailure
+
+---
+# Test Results Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-results-service
+  namespace: rbi-compliance
+  labels:
+    app: test-results
+    component: testing
+spec:
+  selector:
+    app: test-results
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-results-dashboard
+  namespace: rbi-compliance
+  labels:
+    app: test-results
+    component: testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-results
+  template:
+    metadata:
+      labels:
+        app: test-results
+    spec:
+      containers:
+      - name: test-dashboard
+        image: rbi-compliance/test-dashboard:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: S3_BUCKET
+          value: "rbi-compliance-test-results"
+        - name: AWS_REGION
+          value: "ap-south-1"
+        
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5

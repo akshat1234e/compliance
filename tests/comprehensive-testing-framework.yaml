@@ -1,0 +1,669 @@
+# Comprehensive Testing Framework
+# E2E, Performance, Security, and Test Automation Suite
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: comprehensive-test-config
+  namespace: rbi-compliance
+  labels:
+    component: comprehensive-testing
+data:
+  playwright-config.js: |
+    // Playwright E2E Test Configuration
+    module.exports = {
+      testDir: './e2e-tests',
+      timeout: 30000,
+      expect: {
+        timeout: 5000
+      },
+      fullyParallel: true,
+      forbidOnly: !!process.env.CI,
+      retries: process.env.CI ? 2 : 0,
+      workers: process.env.CI ? 1 : undefined,
+      reporter: [
+        ['html'],
+        ['json', { outputFile: 'test-results/results.json' }],
+        ['junit', { outputFile: 'test-results/results.xml' }]
+      ],
+      use: {
+        baseURL: process.env.BASE_URL || 'http://localhost:3000',
+        trace: 'on-first-retry',
+        screenshot: 'only-on-failure',
+        video: 'retain-on-failure'
+      },
+      projects: [
+        {
+          name: 'chromium',
+          use: { ...devices['Desktop Chrome'] }
+        },
+        {
+          name: 'firefox',
+          use: { ...devices['Desktop Firefox'] }
+        },
+        {
+          name: 'webkit',
+          use: { ...devices['Desktop Safari'] }
+        },
+        {
+          name: 'mobile-chrome',
+          use: { ...devices['Pixel 5'] }
+        }
+      ],
+      webServer: {
+        command: 'npm run start',
+        port: 3000,
+        reuseExistingServer: !process.env.CI
+      }
+    };
+
+  k6-performance-config.js: |
+    // K6 Performance Test Configuration
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Rate, Trend } from 'k6/metrics';
+    
+    // Custom metrics
+    const errorRate = new Rate('errors');
+    const responseTime = new Trend('response_time');
+    
+    export let options = {
+      stages: [
+        { duration: '2m', target: 10 },   // Ramp up
+        { duration: '5m', target: 50 },   // Stay at 50 users
+        { duration: '10m', target: 100 }, // Ramp to 100 users
+        { duration: '5m', target: 50 },   // Ramp down
+        { duration: '2m', target: 0 },    // Ramp down to 0
+      ],
+      thresholds: {
+        http_req_duration: ['p(95)<500'],
+        http_req_failed: ['rate<0.05'],
+        errors: ['rate<0.1'],
+        response_time: ['p(95)<1000']
+      }
+    };
+    
+    const BASE_URL = __ENV.BASE_URL || 'http://api-gateway:8080';
+    
+    export default function() {
+      // Authentication test
+      let authResponse = http.post(`${BASE_URL}/api/auth/login`, {
+        username: 'testuser',
+        password: 'password123'
+      });
+      
+      let authCheck = check(authResponse, {
+        'auth status is 200': (r) => r.status === 200,
+        'auth response time < 500ms': (r) => r.timings.duration < 500
+      });
+      
+      errorRate.add(!authCheck);
+      responseTime.add(authResponse.timings.duration);
+      
+      if (authCheck) {
+        let token = authResponse.json('token');
+        
+        // API endpoint tests
+        let endpoints = [
+          '/api/compliance/rules',
+          '/api/documents',
+          '/api/workflows',
+          '/api/reports'
+        ];
+        
+        endpoints.forEach(endpoint => {
+          let response = http.get(`${BASE_URL}${endpoint}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          let success = check(response, {
+            'status is 200': (r) => r.status === 200,
+            'response time < 1000ms': (r) => r.timings.duration < 1000
+          });
+          
+          errorRate.add(!success);
+          responseTime.add(response.timings.duration);
+        });
+      }
+      
+      sleep(1);
+    }
+
+  security-test-config.yaml: |
+    # Security Testing Configuration
+    security_tests:
+      authentication:
+        - test_name: "SQL Injection in Login"
+          endpoint: "/api/auth/login"
+          method: "POST"
+          payload:
+            username: "admin' OR '1'='1"
+            password: "password"
+          expected_status: 400
+        
+        - test_name: "XSS in Registration"
+          endpoint: "/api/auth/register"
+          method: "POST"
+          payload:
+            username: "<script>alert('xss')</script>"
+            email: "test@example.com"
+            password: "password123"
+          expected_status: 400
+      
+      authorization:
+        - test_name: "Access Admin Endpoint Without Permission"
+          endpoint: "/api/admin/users"
+          method: "GET"
+          headers:
+            Authorization: "Bearer user_token"
+          expected_status: 403
+        
+        - test_name: "Access Protected Resource Without Token"
+          endpoint: "/api/compliance/rules"
+          method: "GET"
+          expected_status: 401
+      
+      input_validation:
+        - test_name: "Large Payload Attack"
+          endpoint: "/api/documents/upload"
+          method: "POST"
+          payload_size: "100MB"
+          expected_status: 413
+        
+        - test_name: "Invalid JSON Format"
+          endpoint: "/api/compliance/rules"
+          method: "POST"
+          payload: "invalid json"
+          expected_status: 400
+      
+      rate_limiting:
+        - test_name: "Rate Limit Enforcement"
+          endpoint: "/api/auth/login"
+          method: "POST"
+          requests_per_minute: 100
+          expected_status: 429
+
+  test-data-factory.yaml: |
+    # Test Data Factory Configuration
+    test_data:
+      users:
+        - username: "testuser1"
+          email: "test1@example.com"
+          password: "password123"
+          role: "USER"
+          enabled: true
+        
+        - username: "testadmin"
+          email: "admin@example.com"
+          password: "admin123"
+          role: "ADMIN"
+          enabled: true
+        
+        - username: "testmanager"
+          email: "manager@example.com"
+          password: "manager123"
+          role: "MANAGER"
+          enabled: true
+      
+      compliance_rules:
+        - rule_id: "TEST_RULE_001"
+          rule_name: "Test Transaction Limit"
+          rule_type: "TRANSACTION_LIMIT"
+          description: "Test rule for transaction limits"
+          rule_expression: "amount <= 1000000"
+          severity: "HIGH"
+          enabled: true
+        
+        - rule_id: "TEST_RULE_002"
+          rule_name: "Test Daily Count"
+          rule_type: "TRANSACTION_COUNT"
+          description: "Test rule for daily transaction count"
+          rule_expression: "count <= 100"
+          severity: "MEDIUM"
+          enabled: true
+      
+      documents:
+        - document_id: "TEST_DOC_001"
+          title: "Test Document 1"
+          document_type: "PDF"
+          file_path: "/test/documents/test1.pdf"
+          status: "PROCESSED"
+          uploaded_by: "testuser1"
+        
+        - document_id: "TEST_DOC_002"
+          title: "Test Document 2"
+          document_type: "DOCX"
+          file_path: "/test/documents/test2.docx"
+          status: "PENDING"
+          uploaded_by: "testuser1"
+      
+      workflows:
+        - workflow_id: "TEST_WF_001"
+          workflow_name: "Test Approval Workflow"
+          workflow_type: "APPROVAL"
+          status: "ACTIVE"
+          created_by: "testadmin"
+        
+        - workflow_id: "TEST_WF_002"
+          workflow_name: "Test Review Workflow"
+          workflow_type: "REVIEW"
+          status: "DRAFT"
+          created_by: "testmanager"
+
+---
+# E2E Test Execution Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-tests-execution
+  namespace: rbi-compliance
+  labels:
+    component: e2e-testing
+spec:
+  template:
+    spec:
+      containers:
+      - name: playwright-tests
+        image: mcr.microsoft.com/playwright:v1.40.0-focal
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting E2E test execution with Playwright..."
+          
+          cd /workspace/e2e-tests
+          
+          # Install dependencies
+          npm ci
+          
+          # Install Playwright browsers
+          npx playwright install --with-deps
+          
+          # Run E2E tests
+          npx playwright test \
+            --config=playwright.config.js \
+            --reporter=html,json,junit
+          
+          # Copy results
+          cp -r test-results /test-results/e2e-results
+          cp -r playwright-report /test-results/e2e-report
+          
+          echo "E2E tests completed successfully!"
+        
+        env:
+        - name: BASE_URL
+          value: "http://frontend:3000"
+        - name: API_BASE_URL
+          value: "http://api-gateway:8080"
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Performance Test Execution Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: performance-tests-execution
+  namespace: rbi-compliance
+  labels:
+    component: performance-testing
+spec:
+  template:
+    spec:
+      containers:
+      - name: k6-tests
+        image: grafana/k6:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          
+          echo "Starting performance test execution with K6..."
+          
+          # Run load tests
+          k6 run \
+            --out json=/test-results/performance-results.json \
+            --out influxdb=http://influxdb:8086/k6 \
+            /workspace/tests/performance/load-test.js
+          
+          # Run stress tests
+          k6 run \
+            --out json=/test-results/stress-results.json \
+            /workspace/tests/performance/stress-test.js
+          
+          # Run spike tests
+          k6 run \
+            --out json=/test-results/spike-results.json \
+            /workspace/tests/performance/spike-test.js
+          
+          echo "Performance tests completed successfully!"
+        
+        env:
+        - name: BASE_URL
+          value: "http://api-gateway:8080"
+        - name: VUS
+          value: "100"
+        - name: DURATION
+          value: "10m"
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 1Gi
+      
+      restartPolicy: Never
+
+---
+# Security Test Execution Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: security-tests-execution
+  namespace: rbi-compliance
+  labels:
+    component: security-testing
+spec:
+  template:
+    spec:
+      containers:
+      - name: security-tests
+        image: rbi-compliance/security-tester:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting security test execution..."
+          
+          # OWASP ZAP security scanning
+          zap-baseline.py \
+            -t http://api-gateway:8080 \
+            -J /test-results/zap-report.json \
+            -r /test-results/zap-report.html
+          
+          # SQL injection tests
+          sqlmap -u "http://api-gateway:8080/api/auth/login" \
+            --data="username=test&password=test" \
+            --batch --output-dir=/test-results/sqlmap
+          
+          # Custom security tests
+          python3 /scripts/security-tests.py \
+            --config /workspace/tests/security/security-test-config.yaml \
+            --output /test-results/custom-security-results.json
+          
+          echo "Security tests completed successfully!"
+        
+        env:
+        - name: TARGET_URL
+          value: "http://api-gateway:8080"
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: test-results
+          mountPath: /test-results
+      
+      volumes:
+      - name: workspace
+        configMap:
+          name: source-code
+      - name: test-results
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      restartPolicy: Never
+
+---
+# Test Automation Orchestrator
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-automation-orchestrator
+  namespace: rbi-compliance
+  labels:
+    component: test-automation
+spec:
+  template:
+    spec:
+      containers:
+      - name: test-orchestrator
+        image: rbi-compliance/test-orchestrator:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+          
+          echo "Starting comprehensive test automation..."
+          
+          # Test execution order
+          TEST_JOBS=(
+            "unit-tests-execution"
+            "integration-tests-execution"
+            "e2e-tests-execution"
+            "performance-tests-execution"
+            "security-tests-execution"
+          )
+          
+          # Execute tests in sequence
+          for job in "${TEST_JOBS[@]}"; do
+            echo "Executing $job..."
+            
+            # Create job from template
+            kubectl create job "$job-$(date +%s)" \
+              --from=job/"$job" \
+              -n rbi-compliance
+            
+            # Wait for completion
+            kubectl wait --for=condition=complete \
+              --timeout=1800s \
+              job/"$job-$(date +%s)" \
+              -n rbi-compliance
+            
+            # Check if job succeeded
+            if kubectl get job "$job-$(date +%s)" -n rbi-compliance \
+               -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' | grep -q "True"; then
+              echo "$job completed successfully"
+            else
+              echo "$job failed"
+              exit 1
+            fi
+          done
+          
+          # Generate comprehensive test report
+          python3 /scripts/generate-test-report.py \
+            --test-results /test-results \
+            --output /test-results/comprehensive-test-report.html
+          
+          # Upload results
+          if [ -n "${AWS_S3_BUCKET:-}" ]; then
+            aws s3 sync /test-results s3://$AWS_S3_BUCKET/comprehensive-test-results/$(date +%Y%m%d_%H%M%S)/
+          fi
+          
+          echo "Comprehensive test automation completed successfully!"
+        
+        env:
+        - name: AWS_S3_BUCKET
+          value: "rbi-compliance-test-results"
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        
+        volumeMounts:
+        - name: test-results
+          mountPath: /test-results
+      
+      volumes:
+      - name: test-results
+        emptyDir:
+          sizeLimit: 10Gi
+      
+      restartPolicy: Never
+
+---
+# Test Reporting Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-reporting-dashboard
+  namespace: rbi-compliance
+  labels:
+    app: test-reporting
+    component: test-automation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-reporting
+  template:
+    metadata:
+      labels:
+        app: test-reporting
+    spec:
+      containers:
+      - name: test-dashboard
+        image: rbi-compliance/test-dashboard:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: S3_BUCKET
+          value: "rbi-compliance-test-results"
+        - name: DATABASE_URL
+          value: "postgresql://test-db:5432/test_results"
+        
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-reporting-service
+  namespace: rbi-compliance
+  labels:
+    app: test-reporting
+spec:
+  selector:
+    app: test-reporting
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+
+---
+# Automated Test Execution CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: automated-comprehensive-tests
+  namespace: rbi-compliance
+  labels:
+    component: test-automation
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: automated-tests
+            image: rbi-compliance/test-orchestrator:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting automated comprehensive test execution..."
+              
+              # Trigger test automation orchestrator
+              kubectl create job test-automation-$(date +%s) \
+                --from=job/test-automation-orchestrator \
+                -n rbi-compliance
+              
+              echo "Automated test execution triggered successfully!"
+            
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+          
+          restartPolicy: OnFailure

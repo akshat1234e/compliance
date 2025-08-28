@@ -1,0 +1,194 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: compliance-platform-base
+
+resources:
+  # Namespaces
+  - namespace.yaml
+  
+  # ConfigMaps and Secrets
+  - configmap.yaml
+  - secrets.yaml
+  
+  # Databases
+  - postgres.yaml
+  - mongodb.yaml
+  - redis.yaml
+  - elasticsearch.yaml
+  
+  # Message Queue
+  - kafka.yaml
+  - rabbitmq.yaml
+  
+  # API Gateway
+  - kong.yaml
+  
+  # Backend Services
+  - regulatory-intelligence.yaml
+  - compliance-orchestration.yaml
+  - document-management.yaml
+  - reporting-analytics.yaml
+  - risk-assessment.yaml
+  - integration-gateway.yaml
+  
+  # AI/ML Services
+  - ai-services.yaml
+  
+  # Frontend
+  - frontend.yaml
+  
+  # Monitoring
+  - prometheus.yaml
+  - grafana.yaml
+  
+  # Ingress
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/name: compliance-platform
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/component: microservice
+  app.kubernetes.io/part-of: compliance-platform
+  app.kubernetes.io/managed-by: kustomize
+
+commonAnnotations:
+  contact: "platform-team@compliance.com"
+  documentation: "https://docs.compliance-platform.com"
+
+images:
+  - name: regulatory-intelligence
+    newName: ghcr.io/compliance-platform/regulatory-intelligence
+    newTag: latest
+  - name: compliance-orchestration
+    newName: ghcr.io/compliance-platform/compliance-orchestration
+    newTag: latest
+  - name: document-management
+    newName: ghcr.io/compliance-platform/document-management
+    newTag: latest
+  - name: reporting-analytics
+    newName: ghcr.io/compliance-platform/reporting-analytics
+    newTag: latest
+  - name: risk-assessment
+    newName: ghcr.io/compliance-platform/risk-assessment
+    newTag: latest
+  - name: integration-gateway
+    newName: ghcr.io/compliance-platform/integration-gateway
+    newTag: latest
+  - name: ai-services
+    newName: ghcr.io/compliance-platform/ai-services
+    newTag: latest
+  - name: frontend
+    newName: ghcr.io/compliance-platform/frontend
+    newTag: latest
+
+replicas:
+  - name: regulatory-intelligence
+    count: 3
+  - name: compliance-orchestration
+    count: 3
+  - name: document-management
+    count: 2
+  - name: reporting-analytics
+    count: 2
+  - name: risk-assessment
+    count: 2
+  - name: integration-gateway
+    count: 3
+  - name: ai-services
+    count: 2
+  - name: frontend
+    count: 3
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - API_VERSION=v1
+      - ENABLE_METRICS=true
+      - ENABLE_TRACING=true
+      - CORS_ORIGIN=https://compliance-platform.com
+      - SESSION_TIMEOUT=3600
+      - MAX_REQUEST_SIZE=10mb
+      - RATE_LIMIT_WINDOW=900
+      - RATE_LIMIT_MAX=1000
+
+secretGenerator:
+  - name: app-secrets
+    literals:
+      - JWT_SECRET=REPLACE_IN_OVERLAY
+      - DATABASE_PASSWORD=REPLACE_IN_OVERLAY
+      - REDIS_PASSWORD=REPLACE_IN_OVERLAY
+      - MONGODB_PASSWORD=REPLACE_IN_OVERLAY
+      - ELASTICSEARCH_PASSWORD=REPLACE_IN_OVERLAY
+      - KAFKA_PASSWORD=REPLACE_IN_OVERLAY
+      - ENCRYPTION_KEY=REPLACE_IN_OVERLAY
+
+patchesStrategicMerge:
+  - resource-limits.yaml
+  - security-context.yaml
+  - health-checks.yaml
+
+patchesJson6902:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: regulatory-intelligence
+    path: patches/add-volume-mounts.yaml
+
+generatorOptions:
+  disableNameSuffixHash: false
+  labels:
+    app.kubernetes.io/component: config
+
+vars:
+  - name: NAMESPACE
+    objref:
+      kind: Namespace
+      name: compliance-platform
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  
+  - name: DATABASE_HOST
+    objref:
+      kind: Service
+      name: postgres
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  
+  - name: REDIS_HOST
+    objref:
+      kind: Service
+      name: redis
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  
+  - name: MONGODB_HOST
+    objref:
+      kind: Service
+      name: mongodb
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  
+  - name: ELASTICSEARCH_HOST
+    objref:
+      kind: Service
+      name: elasticsearch
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  
+  - name: KAFKA_HOST
+    objref:
+      kind: Service
+      name: kafka
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name

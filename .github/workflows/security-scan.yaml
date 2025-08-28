@@ -1,0 +1,344 @@
+# Security Scanning Workflow
+# Comprehensive security scanning for vulnerabilities and compliance
+
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Dependency Vulnerability Scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        cd frontend && npm ci
+
+    - name: Run npm audit
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit.json || true
+        cd frontend && npm audit --audit-level=moderate --json > ../frontend-audit.json || true
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Run OWASP Dependency Check
+      run: |
+        mvn org.owasp:dependency-check-maven:check \
+          -DfailBuildOnCVSS=7 \
+          -DsuppressionsLocation=.github/security/dependency-check-suppressions.xml
+
+    - name: Upload dependency check results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-check-report
+        path: target/dependency-check-report.html
+
+  # SAST (Static Application Security Testing)
+  sast-scan:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript, java, python
+        queries: security-extended,security-and-quality
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
+
+    - name: Run Semgrep
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: >-
+          p/security-audit
+          p/secrets
+          p/owasp-top-ten
+          p/java
+          p/javascript
+          p/typescript
+
+    - name: Run Bandit (Python Security Linter)
+      run: |
+        pip install bandit[toml]
+        bandit -r . -f json -o bandit-report.json || true
+
+    - name: Upload SAST results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: sast-results
+        path: |
+          bandit-report.json
+          .semgrep_logs/
+
+  # Container Security Scanning
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: dependency-scan
+    strategy:
+      matrix:
+        service: [auth-service, compliance-service, document-service, workflow-service, integration-gateway, api-gateway, frontend]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ matrix.service }}:latest -f services/${{ matrix.service }}/Dockerfile .
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ matrix.service }}:latest'
+        format: 'sarif'
+        output: 'trivy-results-${{ matrix.service }}.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
+
+    - name: Run Snyk Container scan
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        image: '${{ matrix.service }}:latest'
+        args: --severity-threshold=high
+
+  # Infrastructure Security Scanning
+  infrastructure-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: kubernetes,dockerfile,terraform
+        output_format: sarif
+        output_file_path: checkov-report.sarif
+
+    - name: Upload Checkov scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: checkov-report.sarif
+
+    - name: Run kube-score
+      run: |
+        wget https://github.com/zegl/kube-score/releases/latest/download/kube-score_linux_amd64.tar.gz
+        tar xzf kube-score_linux_amd64.tar.gz
+        ./kube-score score k8s/**/*.yaml > kube-score-report.txt || true
+
+    - name: Upload infrastructure scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: infrastructure-scan-results
+        path: |
+          checkov-report.sarif
+          kube-score-report.txt
+
+  # Secrets Scanning
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    - name: Run GitLeaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # License Compliance Scanning
+  license-scan:
+    name: License Compliance Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install license-checker
+      run: npm install -g license-checker
+
+    - name: Check JavaScript licenses
+      run: |
+        license-checker --json --out js-licenses.json
+        cd frontend && license-checker --json --out ../frontend-licenses.json
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Check Java licenses
+      run: |
+        mvn org.codehaus.mojo:license-maven-plugin:aggregate-third-party-report
+
+    - name: Upload license reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: license-reports
+        path: |
+          js-licenses.json
+          frontend-licenses.json
+          target/site/aggregate-third-party-report.html
+
+  # Security Report Generation
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, sast-scan, container-scan, infrastructure-scan, secrets-scan, license-scan]
+    if: always()
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Generate security report
+      run: |
+        pip install jinja2 markdown
+        python .github/scripts/generate-security-report.py
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: security-report.html
+
+    - name: Comment PR with security summary
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('security-summary.md', 'utf8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+  # Security Notification
+  security-notification:
+    name: Security Notification
+    runs-on: ubuntu-latest
+    needs: security-report
+    if: failure() && github.ref == 'refs/heads/main'
+    steps:
+    - name: Notify security team
+      uses: 8398a7/action-slack@v3
+      with:
+        status: 'failure'
+        channel: '#security-alerts'
+        webhook_url: ${{ secrets.SECURITY_SLACK_WEBHOOK }}
+        message: |
+          🚨 Security scan failed on main branch
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+          Please review the security report immediately.
+
+    - name: Create security issue
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🚨 Security Scan Failure - Immediate Action Required',
+            body: `
+              ## Security Scan Failure Alert
+              
+              **Repository:** ${context.repo.full_name}
+              **Branch:** ${context.ref}
+              **Commit:** ${context.sha}
+              **Workflow:** ${context.workflow}
+              **Run ID:** ${context.runId}
+              
+              ### Action Required
+              1. Review the security scan results
+              2. Address any critical vulnerabilities
+              3. Update dependencies if necessary
+              4. Re-run security scans
+              
+              ### Links
+              - [Workflow Run](${context.payload.repository.html_url}/actions/runs/${context.runId})
+              - [Security Report](${context.payload.repository.html_url}/actions/runs/${context.runId}/artifacts)
+              
+              **Priority:** High
+              **Assignees:** @security-team
+            `,
+            labels: ['security', 'critical', 'bug'],
+            assignees: ['security-team-lead']
+          });

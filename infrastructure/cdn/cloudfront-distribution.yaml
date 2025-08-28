@@ -1,0 +1,617 @@
+# AWS CloudFront Distribution Configuration
+# High-performance CDN for RBI Compliance Platform static assets
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFront CDN Distribution for RBI Compliance Platform'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  DomainName:
+    Type: String
+    Default: rbi-compliance.com
+    Description: Primary domain name
+  
+  CertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for SSL/TLS
+  
+  S3BucketName:
+    Type: String
+    Default: rbi-compliance-static-assets
+    Description: S3 bucket for static assets
+
+Resources:
+  # S3 Bucket for Static Assets
+  StaticAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${S3BucketName}-${Environment}'
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteOldVersions
+          Status: Enabled
+          NoncurrentVersionExpirationInDays: 30
+        - Id: TransitionToIA
+          Status: Enabled
+          TransitionInDays: 30
+          StorageClass: STANDARD_IA
+        - Id: TransitionToGlacier
+          Status: Enabled
+          TransitionInDays: 90
+          StorageClass: GLACIER
+      NotificationConfiguration:
+        CloudWatchConfigurations:
+        - Event: s3:ObjectCreated:*
+          CloudWatchConfiguration:
+            LogGroupName: !Ref S3LogGroup
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders: ['*']
+          AllowedMethods: [GET, HEAD]
+          AllowedOrigins: 
+          - !Sub 'https://${DomainName}'
+          - !Sub 'https://app.${DomainName}'
+          - !Sub 'https://admin.${DomainName}'
+          MaxAge: 3600
+      Tags:
+      - Key: Environment
+        Value: !Ref Environment
+      - Key: Project
+        Value: RBI-Compliance
+      - Key: Component
+        Value: CDN-Storage
+
+  # Origin Access Control for CloudFront
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'rbi-compliance-oac-${Environment}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+        Description: 'Origin Access Control for RBI Compliance static assets'
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        # Origins Configuration
+        Origins:
+        # S3 Static Assets Origin
+        - Id: S3Origin
+          DomainName: !GetAtt StaticAssetsBucket.RegionalDomainName
+          S3OriginConfig:
+            OriginAccessIdentity: ''
+          OriginAccessControlId: !GetAtt OriginAccessControl.Id
+          OriginPath: ''
+          CustomOriginConfig: null
+        
+        # API Gateway Origin for dynamic content
+        - Id: APIOrigin
+          DomainName: !Sub 'api.${DomainName}'
+          CustomOriginConfig:
+            HTTPPort: 443
+            HTTPSPort: 443
+            OriginProtocolPolicy: https-only
+            OriginSSLProtocols: [TLSv1.2]
+          OriginPath: ''
+        
+        # Application Origin
+        - Id: AppOrigin
+          DomainName: !Sub 'app.${DomainName}'
+          CustomOriginConfig:
+            HTTPPort: 443
+            HTTPSPort: 443
+            OriginProtocolPolicy: https-only
+            OriginSSLProtocols: [TLSv1.2]
+          OriginPath: ''
+
+        # Default Cache Behavior
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          CachePolicyId: !Ref StaticAssetsCachePolicy
+          OriginRequestPolicyId: !Ref CORSOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Additional Cache Behaviors
+        CacheBehaviors:
+        # API Routes - No Caching
+        - PathPattern: '/api/*'
+          TargetOriginId: APIOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref NoCachePolicy
+          OriginRequestPolicyId: !Ref AllViewerOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # JavaScript Files - Long Cache with Versioning
+        - PathPattern: '/js/*'
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref LongCachePolicy
+          OriginRequestPolicyId: !Ref CORSOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # CSS Files - Long Cache with Versioning
+        - PathPattern: '/css/*'
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref LongCachePolicy
+          OriginRequestPolicyId: !Ref CORSOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Images - Medium Cache
+        - PathPattern: '/images/*'
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref MediumCachePolicy
+          OriginRequestPolicyId: !Ref CORSOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Fonts - Very Long Cache
+        - PathPattern: '/fonts/*'
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: false  # Fonts are already compressed
+          CachePolicyId: !Ref VeryLongCachePolicy
+          OriginRequestPolicyId: !Ref CORSOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Documents - Short Cache with Authentication
+        - PathPattern: '/documents/*'
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref ShortCachePolicy
+          OriginRequestPolicyId: !Ref AuthenticatedOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          TrustedKeyGroups: [!Ref SignedURLKeyGroup]
+
+        # Application Routes - Forward to App Origin
+        - PathPattern: '/app/*'
+          TargetOriginId: AppOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref ShortCachePolicy
+          OriginRequestPolicyId: !Ref AllViewerOriginRequestPolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+
+        # Global Configuration
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: PriceClass_All
+        
+        # Custom Error Pages
+        CustomErrorResponses:
+        - ErrorCode: 403
+          ResponseCode: 404
+          ResponsePagePath: '/error-pages/404.html'
+          ErrorCachingMinTTL: 300
+        - ErrorCode: 404
+          ResponseCode: 404
+          ResponsePagePath: '/error-pages/404.html'
+          ErrorCachingMinTTL: 300
+        - ErrorCode: 500
+          ResponseCode: 500
+          ResponsePagePath: '/error-pages/500.html'
+          ErrorCachingMinTTL: 60
+        - ErrorCode: 502
+          ResponseCode: 502
+          ResponsePagePath: '/error-pages/502.html'
+          ErrorCachingMinTTL: 60
+        - ErrorCode: 503
+          ResponseCode: 503
+          ResponsePagePath: '/error-pages/503.html'
+          ErrorCachingMinTTL: 60
+
+        # Aliases and SSL
+        Aliases:
+        - !Sub 'cdn.${DomainName}'
+        - !Sub 'assets.${DomainName}'
+        - !Sub 'static.${DomainName}'
+        
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+        # Logging
+        Logging:
+          Bucket: !GetAtt LoggingBucket.DomainName
+          IncludeCookies: false
+          Prefix: 'cloudfront-logs/'
+
+        # Geographic Restrictions
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+        # Web ACL Association
+        WebACLId: !Ref CloudFrontWebACL
+
+      Tags:
+      - Key: Environment
+        Value: !Ref Environment
+      - Key: Project
+        Value: RBI-Compliance
+      - Key: Component
+        Value: CDN-Distribution
+
+  # Cache Policies
+  StaticAssetsCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-static-assets-${Environment}'
+        Comment: 'Cache policy for static assets'
+        DefaultTTL: 86400  # 1 day
+        MaxTTL: 31536000   # 1 year
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: whitelist
+            QueryStrings: ['v', 'version', 'hash']
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['Accept', 'Accept-Encoding', 'Origin']
+          CookiesConfig:
+            CookieBehavior: none
+
+  LongCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-long-cache-${Environment}'
+        Comment: 'Long cache policy for versioned assets'
+        DefaultTTL: 2592000   # 30 days
+        MaxTTL: 31536000      # 1 year
+        MinTTL: 86400         # 1 day
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: whitelist
+            QueryStrings: ['v', 'version', 'hash']
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['Accept', 'Accept-Encoding']
+          CookiesConfig:
+            CookieBehavior: none
+
+  MediumCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-medium-cache-${Environment}'
+        Comment: 'Medium cache policy for images'
+        DefaultTTL: 604800    # 7 days
+        MaxTTL: 31536000      # 1 year
+        MinTTL: 3600          # 1 hour
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: whitelist
+            QueryStrings: ['w', 'h', 'q', 'format']
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['Accept', 'Accept-Encoding']
+          CookiesConfig:
+            CookieBehavior: none
+
+  VeryLongCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-very-long-cache-${Environment}'
+        Comment: 'Very long cache policy for fonts'
+        DefaultTTL: 31536000  # 1 year
+        MaxTTL: 31536000      # 1 year
+        MinTTL: 2592000       # 30 days
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: false
+          EnableAcceptEncodingBrotli: false
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['Accept', 'Origin']
+          CookiesConfig:
+            CookieBehavior: none
+
+  ShortCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-short-cache-${Environment}'
+        Comment: 'Short cache policy for dynamic content'
+        DefaultTTL: 300       # 5 minutes
+        MaxTTL: 3600          # 1 hour
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: all
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['Accept', 'Accept-Encoding', 'Authorization', 'Origin']
+          CookiesConfig:
+            CookieBehavior: whitelist
+            Cookies: ['session', 'auth-token']
+
+  NoCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'rbi-compliance-no-cache-${Environment}'
+        Comment: 'No cache policy for API endpoints'
+        DefaultTTL: 0
+        MaxTTL: 0
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          QueryStringsConfig:
+            QueryStringBehavior: all
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers: ['*']
+          CookiesConfig:
+            CookieBehavior: all
+
+  # Origin Request Policies
+  CORSOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub 'rbi-compliance-cors-${Environment}'
+        Comment: 'CORS origin request policy'
+        QueryStringsConfig:
+          QueryStringBehavior: whitelist
+          QueryStrings: ['v', 'version', 'hash', 'w', 'h', 'q', 'format']
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers: ['Accept', 'Accept-Encoding', 'Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']
+        CookiesConfig:
+          CookieBehavior: none
+
+  AllViewerOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub 'rbi-compliance-all-viewer-${Environment}'
+        Comment: 'Forward all viewer request data'
+        QueryStringsConfig:
+          QueryStringBehavior: all
+        HeadersConfig:
+          HeaderBehavior: allViewer
+        CookiesConfig:
+          CookieBehavior: all
+
+  AuthenticatedOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub 'rbi-compliance-authenticated-${Environment}'
+        Comment: 'Origin request policy for authenticated content'
+        QueryStringsConfig:
+          QueryStringBehavior: all
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers: ['Accept', 'Accept-Encoding', 'Authorization', 'Origin', 'User-Agent']
+        CookiesConfig:
+          CookieBehavior: whitelist
+          Cookies: ['session', 'auth-token', 'csrf-token']
+
+  # Response Headers Policy
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'rbi-compliance-security-headers-${Environment}'
+        Comment: 'Security headers for RBI Compliance Platform'
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+        CustomHeadersConfig:
+          Items:
+          - Header: 'X-Content-Security-Policy'
+            Value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.rbi-compliance.com"
+            Override: true
+          - Header: 'X-Permitted-Cross-Domain-Policies'
+            Value: 'none'
+            Override: true
+          - Header: 'X-XSS-Protection'
+            Value: '1; mode=block'
+            Override: true
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items: ['Accept', 'Accept-Encoding', 'Authorization', 'Content-Type', 'Origin', 'X-Requested-With']
+          AccessControlAllowMethods:
+            Items: ['GET', 'HEAD', 'OPTIONS']
+          AccessControlAllowOrigins:
+            Items: 
+            - !Sub 'https://${DomainName}'
+            - !Sub 'https://app.${DomainName}'
+            - !Sub 'https://admin.${DomainName}'
+          AccessControlExposeHeaders:
+            Items: ['Content-Length', 'Date', 'Server']
+          AccessControlMaxAgeSec: 86400
+          OriginOverride: true
+
+  # Signed URL Key Group for Protected Content
+  SignedURLKeyGroup:
+    Type: AWS::CloudFront::KeyGroup
+    Properties:
+      KeyGroupConfig:
+        Name: !Sub 'rbi-compliance-signed-urls-${Environment}'
+        Comment: 'Key group for signed URLs'
+        Items:
+        - !Ref CloudFrontPublicKey
+
+  CloudFrontPublicKey:
+    Type: AWS::CloudFront::PublicKey
+    Properties:
+      PublicKeyConfig:
+        Name: !Sub 'rbi-compliance-public-key-${Environment}'
+        Comment: 'Public key for signed URLs'
+        CallerReference: !Sub '${AWS::StackName}-${Environment}-${AWS::AccountId}'
+        EncodedKey: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1234567890abcdef...
+          -----END PUBLIC KEY-----
+
+  # WAF Web ACL for CloudFront
+  CloudFrontWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub 'rbi-compliance-cloudfront-waf-${Environment}'
+      Description: 'WAF for CloudFront distribution'
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      Rules:
+      - Name: AWSManagedRulesCommonRuleSet
+        Priority: 1
+        OverrideAction:
+          None: {}
+        Statement:
+          ManagedRuleGroupStatement:
+            VendorName: AWS
+            Name: AWSManagedRulesCommonRuleSet
+        VisibilityConfig:
+          SampledRequestsEnabled: true
+          CloudWatchMetricsEnabled: true
+          MetricName: CommonRuleSetMetric
+      - Name: AWSManagedRulesKnownBadInputsRuleSet
+        Priority: 2
+        OverrideAction:
+          None: {}
+        Statement:
+          ManagedRuleGroupStatement:
+            VendorName: AWS
+            Name: AWSManagedRulesKnownBadInputsRuleSet
+        VisibilityConfig:
+          SampledRequestsEnabled: true
+          CloudWatchMetricsEnabled: true
+          MetricName: KnownBadInputsRuleSetMetric
+      - Name: RateLimitRule
+        Priority: 3
+        Action:
+          Block: {}
+        Statement:
+          RateBasedStatement:
+            Limit: 2000
+            AggregateKeyType: IP
+        VisibilityConfig:
+          SampledRequestsEnabled: true
+          CloudWatchMetricsEnabled: true
+          MetricName: RateLimitRuleMetric
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub 'rbi-compliance-waf-${Environment}'
+
+  # S3 Bucket for CloudFront Logs
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'rbi-compliance-cloudfront-logs-${Environment}'
+      AccessControl: LogDeliveryWrite
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteOldLogs
+          Status: Enabled
+          ExpirationInDays: 90
+        - Id: TransitionToIA
+          Status: Enabled
+          TransitionInDays: 30
+          StorageClass: STANDARD_IA
+
+  # CloudWatch Log Group for S3 Events
+  S3LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/s3/${S3BucketName}-${Environment}'
+      RetentionInDays: 30
+
+Outputs:
+  CloudFrontDistributionId:
+    Description: 'CloudFront Distribution ID'
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDistributionId'
+
+  CloudFrontDomainName:
+    Description: 'CloudFront Distribution Domain Name'
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomainName'
+
+  S3BucketName:
+    Description: 'S3 Bucket for Static Assets'
+    Value: !Ref StaticAssetsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-S3BucketName'
+
+  CDNEndpoints:
+    Description: 'CDN Endpoints'
+    Value: !Sub 'https://cdn.${DomainName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-CDNEndpoints'
