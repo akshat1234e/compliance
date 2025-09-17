@@ -4,3 +4,7 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
   console.error(err.stack)
   res.status(500).json({ error: 'Something went wrong!' })
 }
+
+export const asyncHandler = (fn: Function) => (req: Request, res: Response, next: NextFunction) => {
+  Promise.resolve(fn(req, res, next)).catch(next)
+}

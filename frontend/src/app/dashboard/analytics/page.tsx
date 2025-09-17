@@ -11,7 +11,7 @@ import {
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { useState } from 'react'
-import { useQuery } from 'react-query'
+import { useQuery } from '@tanstack/react-query'
 
 // Mock data for development
 const mockAnalyticsData = {

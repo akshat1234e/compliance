@@ -13,9 +13,8 @@ import {
     TrashIcon,
     XCircleIcon,
 } from '@heroicons/react/24/outline'
-import { useMutation, useQuery, useQueryClient } from 'react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-// import { toast } from 'react-hot-toast'
 
 // Mock data for development
 const mockIntegrations = [
@@ -101,24 +100,9 @@ const integrationTypes = [
   { value: 'audit', label: 'Audit Systems' }
 ]
 
-const authTypes = [
-  { value: 'oauth2', label: 'OAuth 2.0' },
-  { value: 'api_key', label: 'API Key' },
-  { value: 'basic', label: 'Basic Auth' },
-  { value: 'jwt', label: 'JWT Token' }
-]
-
-const syncFrequencies = [
-  { value: 'real-time', label: 'Real-time' },
-  { value: 'hourly', label: 'Hourly' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' }
-]
-
 export default function IntegrationsPage() {
   const [selectedType, setSelectedType] = useState('all')
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [selectedIntegration, setSelectedIntegration] = useState<any>(null)
   const queryClient = useQueryClient()
 
   // Fetch integrations
@@ -426,7 +410,7 @@ export default function IntegrationsPage() {
                       onClick={() => handleTestConnection(integration.id)}
                       className="p-2 text-gray-400 hover:text-gray-500"
                       title="Test connection"
-                      disabled={testConnectionMutation.isLoading}
+                      disabled={testConnectionMutation.isPending}
                     >
                       <Cog6ToothIcon className="h-5 w-5" />
                     </button>
@@ -434,7 +418,7 @@ export default function IntegrationsPage() {
                       onClick={() => handleSyncIntegration(integration.id)}
                       className="p-2 text-gray-400 hover:text-gray-500"
                       title="Sync now"
-                      disabled={syncIntegrationMutation.isLoading}
+                      disabled={syncIntegrationMutation.isPending}
                     >
                       <ArrowPathIcon className="h-5 w-5" />
                     </button>
@@ -511,39 +495,6 @@ export default function IntegrationsPage() {
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
                     placeholder="Enter provider name"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Endpoint URL</label>
-                  <input
-                    type="url"
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                    placeholder="https://api.example.com/v1"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Authentication Type</label>
-                  <select className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500">
-                    <option value="">Select auth type</option>
-                    {authTypes.map((auth) => (
-                      <option key={auth.value} value={auth.value}>
-                        {auth.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Sync Frequency</label>
-                  <select className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500">
-                    <option value="">Select frequency</option>
-                    {syncFrequencies.map((freq) => (
-                      <option key={freq.value} value={freq.value}>
-                        {freq.label}
-                      </option>
-                    ))}
-                  </select>
                 </div>
 
                 <div>

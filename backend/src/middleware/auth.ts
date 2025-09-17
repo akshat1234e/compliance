@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
-import { User, IUser } from '../models/User'
+import { User, UserModel } from '../models/User'
 import { logger } from '../utils/logger'
 
 // Extend Request interface to include user
@@ -29,17 +29,17 @@ export const auth = async (req: Request, res: Response, next: NextFunction) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as any
     
     // Find user and check if still active
-    const user = await User.findById(decoded.userId)
-    if (!user || !user.isActive) {
+    const user = await UserModel.findById(decoded.userId)
+    if (!user) {
       return res.status(401).json({ message: 'Invalid token or user deactivated.' })
     }
 
     // Add user info to request
     req.user = {
-      userId: user._id,
+      userId: user.id,
       email: user.email,
       role: user.role,
-      permissions: user.getRolePermissions()
+      permissions: user.permissions
     }
 
     next()
@@ -76,7 +76,7 @@ export const requirePermission = (permission: string) => {
     }
 
     try {
-      const user = await User.findById(req.user.userId)
+      const user = await UserModel.findById(req.user.userId)
       if (!user) {
         return res.status(401).json({ message: 'User not found.' })
       }
@@ -87,11 +87,11 @@ export const requirePermission = (permission: string) => {
       }
 
       // Check if user has the required permission
-      if (!user.hasPermission(permission)) {
+      if (!user.permissions.includes(permission)) {
         return res.status(403).json({ 
           message: 'Access denied. Missing required permission.',
           required: permission,
-          available: user.getRolePermissions()
+          available: user.permissions
         })
       }
 
@@ -110,14 +110,14 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
 
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as any
-      const user = await User.findById(decoded.userId)
+      const user = await UserModel.findById(decoded.userId)
       
-      if (user && user.isActive) {
+      if (user) {
         req.user = {
-          userId: user._id,
+          userId: user.id,
           email: user.email,
           role: user.role,
-          permissions: user.getRolePermissions()
+          permissions: user.permissions
         }
       }
     }

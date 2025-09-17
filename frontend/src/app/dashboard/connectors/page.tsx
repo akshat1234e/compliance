@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from 'react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { 
   ArrowPathIcon, 
@@ -109,9 +109,9 @@ const fetchConnectorStatus = async (): Promise<ConnectorStatusMap> => {
 
 export default function ConnectorsPage() {
   const { data: connectorStatus, isLoading, error, refetch } = useQuery(
-    'connector-status',
-    fetchConnectorStatus,
     {
+      queryKey: ['connector-status'],
+      queryFn: fetchConnectorStatus,
       refetchInterval: 30000,
     }
   )
