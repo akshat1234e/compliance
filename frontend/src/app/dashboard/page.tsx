@@ -1,183 +1,224 @@
 'use client'
 
 import Link from 'next/link'
-import { 
-  ChartBarIcon, 
-  ShieldCheckIcon, 
-  DocumentTextIcon, 
+import {
+  ChartBarIcon,
+  DocumentTextIcon,
+  ShieldCheckIcon,
   ExclamationTriangleIcon,
-  ArrowRightIcon,
-  CheckCircleIcon,
-  XCircleIcon
+  BellIcon,
+  LinkIcon,
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon,
 } from '@heroicons/react/24/outline'
-import { CompliancePieChart, ComplianceTrendChart } from '@/components/charts/ComplianceChart'
 
 const stats = [
-  { name: 'Active Connectors', value: '4/5', change: '+1', changeType: 'positive' },
-  { name: 'Compliance Score', value: '94%', change: '+2%', changeType: 'positive' },
-  { name: 'Open Tasks', value: '12', change: '-3', changeType: 'positive' },
-  { name: 'Risk Level', value: 'Low', change: 'Stable', changeType: 'neutral' },
+  {
+    name: 'Compliance Score',
+    stat: '94%',
+    icon: ShieldCheckIcon,
+    change: '+2.1%',
+    changeType: 'increase',
+  },
+  {
+    name: 'Active Risks',
+    stat: '12',
+    icon: ExclamationTriangleIcon,
+    change: '-3',
+    changeType: 'decrease',
+  },
+  {
+    name: 'Pending Tasks',
+    stat: '23',
+    icon: DocumentTextIcon,
+    change: '+5',
+    changeType: 'increase',
+  },
+  {
+    name: 'System Health',
+    stat: '98%',
+    icon: ChartBarIcon,
+    change: '+0.5%',
+    changeType: 'increase',
+  },
 ]
 
 const quickActions = [
   {
-    name: 'View Connectors',
-    description: 'Monitor banking system connections',
-    href: '/dashboard/connectors',
+    name: 'View Analytics',
+    description: 'Comprehensive compliance and risk analytics',
+    href: '/dashboard/analytics',
     icon: ChartBarIcon,
-    color: 'bg-blue-500'
-  },
-  {
-    name: 'Compliance Dashboard',
-    description: 'Track regulatory compliance',
-    href: '/dashboard/compliance',
-    icon: ShieldCheckIcon,
-    color: 'bg-green-500'
+    color: 'bg-blue-500',
   },
   {
     name: 'Risk Assessment',
-    description: 'Review risk metrics',
+    description: 'Review and manage compliance risks',
     href: '/dashboard/risk',
     icon: ExclamationTriangleIcon,
-    color: 'bg-orange-500'
+    color: 'bg-yellow-500',
   },
   {
-    name: 'Document Center',
-    description: 'Manage compliance documents',
-    href: '/dashboard/documents',
-    icon: DocumentTextIcon,
-    color: 'bg-purple-500'
+    name: 'Regulatory Updates',
+    description: 'Latest RBI circulars and notifications',
+    href: '/dashboard/regulatory',
+    icon: BellIcon,
+    color: 'bg-green-500',
+  },
+  {
+    name: 'System Integrations',
+    description: 'Manage external system connections',
+    href: '/dashboard/integrations',
+    icon: LinkIcon,
+    color: 'bg-purple-500',
   },
 ]
 
 const recentActivity = [
-  { id: 1, action: 'Temenos connector restored', status: 'success', time: '2 minutes ago' },
-  { id: 2, action: 'Compliance report generated', status: 'success', time: '15 minutes ago' },
-  { id: 3, action: 'Flexcube connection failed', status: 'error', time: '1 hour ago' },
-  { id: 4, action: 'Risk assessment completed', status: 'success', time: '2 hours ago' },
+  {
+    id: 1,
+    type: 'compliance',
+    title: 'KYC Documentation Review Completed',
+    time: '2 hours ago',
+    status: 'completed',
+  },
+  {
+    id: 2,
+    type: 'risk',
+    title: 'High Risk Alert: Digital Payment Security',
+    time: '4 hours ago',
+    status: 'pending',
+  },
+  {
+    id: 3,
+    type: 'regulatory',
+    title: 'New RBI Circular on Digital Lending',
+    time: '1 day ago',
+    status: 'new',
+  },
+  {
+    id: 4,
+    type: 'integration',
+    title: 'Core Banking System Sync Completed',
+    time: '2 days ago',
+    status: 'completed',
+  },
 ]
 
 export default function DashboardPage() {
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-2 text-gray-600">
-          Welcome to your RegTech compliance management platform
-        </p>
+    <div>
+      {/* Page header */}
+      <div className="md:flex md:items-center md:justify-between">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
+            Dashboard
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Welcome back! Here&apos;s what&apos;s happening with your compliance operations.
+          </p>
+        </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <div key={stat.name} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">{stat.name}</p>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-              </div>
-              <div className={`text-sm ${
-                stat.changeType === 'positive' ? 'text-green-600' : 
-                stat.changeType === 'negative' ? 'text-red-600' : 'text-gray-600'
-              }`}>
-                {stat.change}
-              </div>
+      <div className="mt-8">
+        <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {stats.map((item) => (
+            <div key={item.name} className="relative bg-white pt-5 px-4 pb-12 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden">
+              <dt>
+                <div className="absolute bg-blue-500 rounded-md p-3">
+                  <item.icon className="h-6 w-6 text-white" />
+                </div>
+                <p className="ml-16 text-sm font-medium text-gray-500 truncate">{item.name}</p>
+              </dt>
+              <dd className="ml-16 pb-6 flex items-baseline sm:pb-7">
+                <p className="text-2xl font-semibold text-gray-900">{item.stat}</p>
+                <p className={`ml-2 flex items-baseline text-sm font-semibold ${
+                  item.changeType === 'increase' ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {item.changeType === 'increase' ? (
+                    <ArrowTrendingUpIcon className="self-center flex-shrink-0 h-5 w-5 text-green-500" />
+                  ) : (
+                    <ArrowTrendingDownIcon className="self-center flex-shrink-0 h-5 w-5 text-red-500" />
+                  )}
+                  <span className="sr-only">{item.changeType === 'increase' ? 'Increased' : 'Decreased'} by</span>
+                  {item.change}
+                </p>
+              </dd>
             </div>
-          </div>
-        ))}
+          ))}
+        </dl>
       </div>
 
       {/* Quick Actions */}
-      <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-6">Quick Actions</h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8">
+        <h3 className="text-lg leading-6 font-medium text-gray-900">Quick Actions</h3>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {quickActions.map((action) => (
             <Link
               key={action.name}
               href={action.href}
-              className="group bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+              className="relative group bg-white p-6 focus-within:ring-2 focus-within:ring-inset focus-within:ring-blue-500 rounded-lg shadow hover:shadow-md transition-shadow"
             >
-              <div className="flex items-center">
-                <div className={`${action.color} rounded-lg p-3`}>
-                  <action.icon className="h-6 w-6 text-white" />
-                </div>
-                <div className="ml-4 flex-1">
-                  <h3 className="text-sm font-medium text-gray-900 group-hover:text-brand-600">
-                    {action.name}
-                  </h3>
-                  <p className="text-sm text-gray-500">{action.description}</p>
-                </div>
-                <ArrowRightIcon className="h-5 w-5 text-gray-400 group-hover:text-brand-600" />
+              <div>
+                <span className={`${action.color} rounded-lg inline-flex p-3 text-white`}>
+                  <action.icon className="h-6 w-6" />
+                </span>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-lg font-medium text-gray-900 group-hover:text-blue-600">
+                  {action.name}
+                </h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  {action.description}
+                </p>
               </div>
             </Link>
           ))}
         </div>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <CompliancePieChart />
-        <ComplianceTrendChart />
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <CompliancePieChart />
-        <ComplianceTrendChart />
-      </div>
-
       {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
-          <div className="space-y-4">
-            {recentActivity.map((activity) => (
-              <div key={activity.id} className="flex items-center space-x-3">
-                {activity.status === 'success' ? (
-                  <CheckCircleIcon className="h-5 w-5 text-green-500" />
-                ) : (
-                  <XCircleIcon className="h-5 w-5 text-red-500" />
-                )}
-                <div className="flex-1">
-                  <p className="text-sm text-gray-900">{activity.action}</p>
-                  <p className="text-xs text-gray-500">{activity.time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">System Status</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">API Gateway</span>
-              <span className="flex items-center text-sm text-green-600">
-                <div className="h-2 w-2 bg-green-400 rounded-full mr-2"></div>
-                Online
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Database</span>
-              <span className="flex items-center text-sm text-green-600">
-                <div className="h-2 w-2 bg-green-400 rounded-full mr-2"></div>
-                Connected
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Message Queue</span>
-              <span className="flex items-center text-sm text-green-600">
-                <div className="h-2 w-2 bg-green-400 rounded-full mr-2"></div>
-                Active
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">AI Services</span>
-              <span className="flex items-center text-sm text-yellow-600">
-                <div className="h-2 w-2 bg-yellow-400 rounded-full mr-2"></div>
-                Degraded
-              </span>
+      <div className="mt-8">
+        <div className="bg-white shadow rounded-lg">
+          <div className="px-4 py-5 sm:p-6">
+            <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Activity</h3>
+            <div className="mt-6 flow-root">
+              <ul className="-my-5 divide-y divide-gray-200">
+                {recentActivity.map((activity) => (
+                  <li key={activity.id} className="py-4">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex-shrink-0">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center ${
+                          activity.status === 'completed' ? 'bg-green-100' :
+                          activity.status === 'pending' ? 'bg-yellow-100' : 'bg-blue-100'
+                        }`}>
+                          <div className={`h-2 w-2 rounded-full ${
+                            activity.status === 'completed' ? 'bg-green-400' :
+                            activity.status === 'pending' ? 'bg-yellow-400' : 'bg-blue-400'
+                          }`} />
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {activity.title}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {activity.time}
+                        </p>
+                      </div>
+                      <div>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          activity.status === 'completed' ? 'bg-green-100 text-green-800' :
+                          activity.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {activity.status}
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
