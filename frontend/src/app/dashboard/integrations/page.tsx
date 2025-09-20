@@ -156,9 +156,13 @@ export default function IntegrationsPage() {
         method: 'POST',
       })
       if (!response.ok) {
-        throw new Error('Sync failed')
+        throw new Error(`Sync failed: ${response.status} ${response.statusText}`)
       }
-      return response.json()
+      try {
+        return await response.json()
+      } catch (error) {
+        throw new Error('Invalid response format')
+      }
     },
     onSuccess: () => {
       console.log('Sync initiated successfully')
@@ -201,20 +205,63 @@ export default function IntegrationsPage() {
 
   const formatLastSync = (timestamp: string | null) => {
     if (!timestamp) return 'Never'
-    return new Date(timestamp).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    try {
+      const date = new Date(timestamp)
+      if (isNaN(date.getTime())) return 'Invalid date'
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch (error) {
+      console.error('Error formatting date:', error)
+      return 'Invalid date'
+    }
   }
 
   const handleTestConnection = (integrationId: string) => {
-    testConnectionMutation.mutate(integrationId)
+    if (!integrationId?.trim()) {
+      console.error('Integration ID is required')
+      alert('Error: Integration ID is required')
+      return
+    }
+    
+    if (testConnectionMutation.isPending) {
+      console.warn('Connection test already in progress')
+      return
+    }
+    
+    testConnectionMutation.mutate(integrationId, {
+      onError: (error) => {
+        alert(`Connection test failed: ${error.message || 'Unknown error'}`)
+      },
+      onSuccess: () => {
+        alert('Connection test successful!')
+      }
+    })
   }
 
   const handleSyncIntegration = (integrationId: string) => {
-    syncIntegrationMutation.mutate(integrationId)
+    if (!integrationId?.trim()) {
+      console.error('Integration ID is required')
+      alert('Error: Integration ID is required')
+      return
+    }
+    
+    if (syncIntegrationMutation.isPending) {
+      console.warn('Sync already in progress')
+      return
+    }
+    
+    syncIntegrationMutation.mutate(integrationId, {
+      onError: (error) => {
+        alert(`Sync failed: ${error.message || 'Unknown error'}`)
+      },
+      onSuccess: () => {
+        alert('Sync initiated successfully!')
+      }
+    })
   }
 
   return (
@@ -247,7 +294,7 @@ export default function IntegrationsPage() {
               <div className="ml-5 w-0 flex-1">
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Total Integrations</dt>
-                  <dd className="text-lg font-medium text-gray-900">{integrations.length}</dd>
+                  <dd className="text-lg font-medium text-gray-900">{integrations?.length || 0}</dd>
                 </dl>
               </div>
             </div>
@@ -264,7 +311,7 @@ export default function IntegrationsPage() {
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Connected</dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {integrations.filter(i => i.status === 'connected').length}
+                    {integrations?.filter(i => i?.status === 'connected').length || 0}
                   </dd>
                 </dl>
               </div>
@@ -282,7 +329,7 @@ export default function IntegrationsPage() {
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Errors</dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {integrations.filter(i => i.status === 'error').length}
+                    {integrations?.filter(i => i?.status === 'error').length || 0}
                   </dd>
                 </dl>
               </div>
@@ -300,7 +347,7 @@ export default function IntegrationsPage() {
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Pending</dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {integrations.filter(i => i.status === 'pending').length}
+                    {integrations?.filter(i => i?.status === 'pending').length || 0}
                   </dd>
                 </dl>
               </div>
@@ -331,7 +378,7 @@ export default function IntegrationsPage() {
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-medium text-gray-900">
-            Integrations ({integrations.length})
+            Integrations ({integrations?.length || 0})
           </h3>
         </div>
 

@@ -1,9 +1,12 @@
 'use client'
 
+import { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { 
   ExclamationTriangleIcon, 
   ShieldCheckIcon, 
-  ChartBarIcon 
+  ChartBarIcon,
+  XMarkIcon 
 } from '@heroicons/react/24/outline'
 
 const riskMetrics = [
@@ -68,6 +71,63 @@ const getStatusColor = (status: string) => {
 }
 
 export default function RiskPage() {
+  const router = useRouter()
+  const [selectedRisk, setSelectedRisk] = useState<any>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+
+  const riskCategories = [
+    'Operational', 'Compliance', 'Security', 'Financial', 'Strategic'
+  ]
+
+  const riskDataCache = useMemo(() => {
+    let seed = 12345
+    const seededRandom = () => {
+      seed = (seed * 9301 + 49297) % 233280
+      return seed / 233280
+    }
+    
+    return Array.from({ length: 25 }, (_, index) => {
+      const category = riskCategories[Math.floor(index / 5)]
+      const intensity = seededRandom()
+      return {
+        id: index,
+        category,
+        score: (intensity * 10).toFixed(1),
+        level: intensity > 0.7 ? 'high' : intensity > 0.4 ? 'medium' : 'low',
+        trend: seededRandom() > 0.5 ? 'up' : 'down',
+        lastUpdated: '2 hours ago'
+      }
+    })
+  }, [])
+
+  const openRiskDetail = (riskData: any) => {
+    setSelectedRisk(riskData)
+    setIsModalOpen(true)
+  }
+
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setSelectedRisk(null)
+  }
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isModalOpen) {
+        closeModal()
+      }
+    }
+
+    if (isModalOpen) {
+      document.addEventListener('keydown', handleEscape)
+      document.body.style.overflow = 'hidden'
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      document.body.style.overflow = 'unset'
+    }
+  }, [isModalOpen])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -114,26 +174,80 @@ export default function RiskPage() {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Risk Heatmap</h3>
         <div className="grid grid-cols-5 gap-2">
-          {Array.from({ length: 25 }, (_, i) => {
-            const intensity = Math.random()
-            return (
-              <div
-                key={i}
-                className={`h-8 rounded ${
-                  intensity > 0.7 ? 'bg-red-500' :
-                  intensity > 0.4 ? 'bg-yellow-500' :
-                  'bg-green-500'
-                } opacity-${Math.floor(intensity * 100)}`}
-                title={`Risk Level: ${(intensity * 10).toFixed(1)}`}
-              />
-            )
-          })}
+          {riskDataCache.map((riskData) => (
+            <div
+              key={riskData.id}
+              onClick={() => openRiskDetail(riskData)}
+              className={`h-8 rounded cursor-pointer hover:scale-105 transition-transform ${
+                riskData.level === 'high' ? 'bg-red-500' :
+                riskData.level === 'medium' ? 'bg-yellow-500' :
+                'bg-green-500'
+              }`}
+              title={`${riskData.category}: ${riskData.score}/10`}
+            />
+          ))}
         </div>
         <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
           <span>Low Risk</span>
           <span>High Risk</span>
         </div>
       </div>
+
+      {/* Risk Detail Modal */}
+      {isModalOpen && selectedRisk && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={closeModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-title"
+        >
+          <div 
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 id="modal-title" className="text-lg font-semibold">{selectedRisk.category} Risk Analysis</h3>
+              <button 
+                onClick={closeModal}
+                className="p-1 hover:bg-gray-100 rounded"
+                aria-label="Close modal"
+              >
+                <XMarkIcon className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm text-gray-500">Current Score</div>
+                <div className={`text-2xl font-bold ${
+                  selectedRisk.level === 'high' ? 'text-red-600' :
+                  selectedRisk.level === 'medium' ? 'text-yellow-600' :
+                  'text-green-600'
+                }`}>
+                  {selectedRisk.score}/10
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500">Trend</div>
+                <div className="font-medium">
+                  {selectedRisk.trend === 'up' ? '↗ Increasing' : '↘ Decreasing'}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500">Last Updated</div>
+                <div className="font-medium">{selectedRisk.lastUpdated}</div>
+              </div>
+              <button 
+                onClick={() => router.push(`/dashboard/risk/${selectedRisk.category.toLowerCase()}`)}
+                className="w-full mt-4 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700"
+                autoFocus
+              >
+                View Detailed Analysis
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Risk Items */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">

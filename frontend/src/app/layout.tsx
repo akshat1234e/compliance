@@ -2,6 +2,9 @@ import { Providers } from '@/components/providers'
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { Toaster } from 'react-hot-toast'
+import { QuickNav } from '@/components/navigation/QuickNav'
+import { Breadcrumb } from '@/components/navigation/Breadcrumb'
+import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration'
 import './globals.css'
 
 const inter = Inter({
@@ -96,8 +99,13 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased`}>
         <Providers>
           <div id="root" className="min-h-screen bg-gray-50">
-            {children}
+            <div className="p-4">
+              <Breadcrumb />
+              {children}
+            </div>
+            <QuickNav />
           </div>
+          <ServiceWorkerRegistration />
           <Toaster
             position="top-right"
             toastOptions={{
@@ -124,22 +132,7 @@ export default function RootLayout({
           />
         </Providers>
 
-        {/* Service Worker Registration */}
-        <script dangerouslySetInnerHTML={{
-          __html: `
-            if ('serviceWorker' in navigator && '${process.env.NODE_ENV}' === 'production') {
-              window.addEventListener('load', function() {
-                navigator.serviceWorker.register('/sw.js')
-                  .then(function(registration) {
-                    console.log('SW registered: ', registration);
-                  })
-                  .catch(function(registrationError) {
-                    console.log('SW registration failed: ', registrationError);
-                  });
-              });
-            }
-          `
-        }} />
+
       </body>
     </html>
   )

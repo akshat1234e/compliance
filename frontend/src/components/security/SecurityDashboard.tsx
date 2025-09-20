@@ -1,12 +1,14 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+import { useRealTime } from '@/hooks/useRealTime'
 import { ShieldCheckIcon, ExclamationTriangleIcon, KeyIcon } from '@heroicons/react/24/outline'
 
 const securityMetrics = [
-  { name: 'Security Score', value: '94%', status: 'good', trend: '+2%' },
-  { name: 'Active Sessions', value: '12', status: 'normal', trend: '+1' },
-  { name: 'Failed Logins', value: '3', status: 'warning', trend: '-2' },
-  { name: 'API Calls', value: '1.2K', status: 'good', trend: '+15%' }
+  { name: 'Security Score', value: '94%', status: 'good', trend: '+2%', href: '/dashboard/security/score' },
+  { name: 'Active Sessions', value: '12', status: 'normal', trend: '+1', href: '/dashboard/security/sessions' },
+  { name: 'Failed Logins', value: '3', status: 'warning', trend: '-2', href: '/dashboard/security/failed-logins' },
+  { name: 'API Calls', value: '1.2K', status: 'good', trend: '+15%', href: '/dashboard/security/api-analytics' }
 ]
 
 const securityEvents = [
@@ -17,17 +19,43 @@ const securityEvents = [
 ]
 
 export function SecurityDashboard() {
+  const router = useRouter()
+  
+  const { data: liveMetrics, lastUpdate } = useRealTime(() => {
+    return securityMetrics.map(metric => ({
+      ...metric,
+      value: metric.name === 'API Calls' 
+        ? `${(Math.random() * 0.5 + 1.0).toFixed(1)}K`
+        : metric.name === 'Active Sessions'
+        ? Math.floor(Math.random() * 5 + 10).toString()
+        : metric.value
+    }))
+  }, { interval: 15000 })
+
+  const displayMetrics = liveMetrics || securityMetrics
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
-        {securityMetrics.map((metric) => (
-          <div key={metric.name} className="bg-white rounded-lg shadow-sm border p-6">
+        {displayMetrics.map((metric) => (
+          <div 
+            key={metric.name} 
+            onClick={() => router.push(metric.href)}
+            className="bg-white rounded-lg shadow-sm border p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600">{metric.name}</p>
                 <p className="text-2xl font-bold text-gray-900">{metric.value}</p>
               </div>
-              <div className="text-sm text-green-600">{metric.trend}</div>
+              <div className="text-sm text-green-600">
+                {metric.trend}
+                {lastUpdate && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    {lastUpdate.toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ))}

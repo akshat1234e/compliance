@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   ChartBarIcon,
   DocumentTextIcon,
@@ -19,6 +20,7 @@ const stats = [
     icon: ShieldCheckIcon,
     change: '+2.1%',
     changeType: 'increase',
+    href: '/dashboard/compliance',
   },
   {
     name: 'Active Risks',
@@ -26,6 +28,7 @@ const stats = [
     icon: ExclamationTriangleIcon,
     change: '-3',
     changeType: 'decrease',
+    href: '/dashboard/risk',
   },
   {
     name: 'Pending Tasks',
@@ -33,6 +36,7 @@ const stats = [
     icon: DocumentTextIcon,
     change: '+5',
     changeType: 'increase',
+    href: '/dashboard/workflows',
   },
   {
     name: 'System Health',
@@ -40,6 +44,7 @@ const stats = [
     icon: ChartBarIcon,
     change: '+0.5%',
     changeType: 'increase',
+    href: '/dashboard/connectors',
   },
 ]
 
@@ -106,6 +111,8 @@ const recentActivity = [
 ]
 
 export default function DashboardPage() {
+  const router = useRouter()
+
   return (
     <div>
       {/* Page header */}
@@ -124,7 +131,11 @@ export default function DashboardPage() {
       <div className="mt-8">
         <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {stats.map((item) => (
-            <div key={item.name} className="relative bg-white pt-5 px-4 pb-12 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden">
+            <div 
+              key={item.name} 
+              onClick={() => router.push(item.href)}
+              className="relative bg-white pt-5 px-4 pb-12 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+            >
               <dt>
                 <div className="absolute bg-blue-500 rounded-md p-3">
                   <item.icon className="h-6 w-6 text-white" />
